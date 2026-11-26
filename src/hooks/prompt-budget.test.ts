@@ -94,13 +94,20 @@ async function until(predicate: () => boolean) {
 function settleRun(
   handlers: ReturnType<typeof createHookHandlers>,
   context: { runId: string; sessionId?: string; sessionKey?: string },
+  reply?: string,
 ) {
   return handlers.onAgentLifecycleEvent({
     ...context,
     stream: "lifecycle",
     seq: 1,
     ts: Date.now(),
-    data: { phase: "end", executionSettled: true },
+    data: {
+      phase: "end",
+      executionSettled: true,
+      ...(reply === undefined
+        ? {}
+        : { terminalReply: { disposition: "visible", text: reply } }),
+    },
   });
 }
 
@@ -943,6 +950,193 @@ describe("native admission identity", () => {
     },
   );
 
+  it.each([
+    { attemptTiming: "staged", settlementTiming: "during lookup" },
+    { attemptTiming: "staged", settlementTiming: "after lookup" },
+    { attemptTiming: "already observed", settlementTiming: "during lookup" },
+    { attemptTiming: "already observed", settlementTiming: "after lookup" },
+  ])(
+    "uses the winning key's terminal reply ($attemptTiming attempt, settlement $settlementTiming)",
+    async ({ attemptTiming, settlementTiming }) => {
+      const { f, admitted, retained, newer, replayCtx, match } =
+        await retainedReplayFixture();
+      const oldKey = "agent:main:direct:old";
+      const firstLookup = deferred<typeof match | undefined>(undefined);
+      const secondLookup = deferred<typeof match | undefined>(undefined);
+      f.sessionLookup
+        .mockReturnValueOnce(firstLookup.promise)
+        .mockReturnValueOnce(secondLookup.promise);
+      const first = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+      const second = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 2);
+
+      const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+      const settle = () =>
+        settleRun(
+          f.handlers,
+          { ...replayCtx, sessionKey: match.sessionKey },
+          "terminal reply",
+        );
+      if (attemptTiming === "already observed") {
+        firstLookup.resolve({ ...match, sessionKey: oldKey });
+        await first;
+      }
+      await f.handlers.onAgentEnd(
+        {
+          success: true,
+          messages: [{ role: "assistant", content: "old reply" }],
+        },
+        { ...replayCtx, sessionKey: oldKey },
+      );
+      if (settlementTiming === "during lookup") await settle();
+      if (attemptTiming === "staged") {
+        firstLookup.resolve({ ...match, sessionKey: oldKey });
+        await first;
+      }
+      expect(f.turnAssociations.resolve(replayCtx.runId)?.sessionKey).toBe(
+        oldKey,
+      );
+      expect(finalize).not.toHaveBeenCalled();
+
+      secondLookup.resolve(match);
+      await second;
+      if (settlementTiming === "after lookup") await settle();
+
+      expect(finalize).toHaveBeenCalledOnce();
+      expect(f.tracker.getTurnState(ctx.sessionId, retained)).toMatchObject({
+        result: "terminal reply",
+        timestamps: { end: expect.any(String) },
+      });
+      expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(newer);
+      await settle();
+      expect(finalize).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["during lookup", "after lookup"] as const)(
+    "keeps the staged reply when the bound key matches the settlement (%s)",
+    async (settlementTiming) => {
+      const { f, admitted, retained, replayCtx, match } =
+        await retainedReplayFixture();
+      const firstLookup = deferred<typeof match | undefined>(undefined);
+      const secondLookup = deferred<typeof match | undefined>(undefined);
+      f.sessionLookup
+        .mockReturnValueOnce(firstLookup.promise)
+        .mockReturnValueOnce(secondLookup.promise);
+      const first = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+      const second = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 2);
+      const current = { ...replayCtx, sessionKey: match.sessionKey };
+      await f.handlers.onAgentEnd(
+        {
+          success: true,
+          messages: [{ role: "assistant", content: "matching reply" }],
+        },
+        current,
+      );
+      const settle = () => settleRun(f.handlers, current, "terminal reply");
+      firstLookup.resolve(match);
+      await first;
+      if (settlementTiming === "during lookup") await settle();
+      secondLookup.resolve(
+        settlementTiming === "during lookup"
+          ? { ...match, sessionKey: "agent:main:direct:later" }
+          : match,
+      );
+      await second;
+      if (settlementTiming === "after lookup") await settle();
+
+      expect(f.tracker.getTurnState(ctx.sessionId, retained)).toMatchObject({
+        result: "matching reply",
+        timestamps: { end: expect.any(String) },
+      });
+      expect(f.turnAssociations.resolve(replayCtx.runId)).toBeUndefined();
+    },
+  );
+
+  it("uses a later matching staged attempt over an earlier attempt from another run", async () => {
+    const { f, admitted, retained, replayCtx, match } =
+      await retainedReplayFixture();
+    const earlier = {
+      ...replayCtx,
+      runId: "earlier-run",
+      sessionKey: match.sessionKey,
+    };
+    await f.handlers.onBeforePromptBuild(admitted, earlier);
+    await f.handlers.onAgentEnd(
+      {
+        success: true,
+        messages: [{ role: "assistant", content: "earlier reply" }],
+      },
+      earlier,
+    );
+
+    const lookup = deferred<typeof match | undefined>(undefined);
+    f.sessionLookup.mockReturnValueOnce(lookup.promise);
+    const pending = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    const current = { ...replayCtx, sessionKey: match.sessionKey };
+    await f.handlers.onAgentEnd(
+      {
+        success: true,
+        messages: [{ role: "assistant", content: "later reply" }],
+      },
+      current,
+    );
+    await settleRun(f.handlers, current);
+    lookup.resolve(match);
+    await pending;
+
+    expect(f.tracker.getTurnState(ctx.sessionId, retained)).toMatchObject({
+      result: "later reply",
+      timestamps: { end: expect.any(String) },
+    });
+  });
+
+  it.each(["settlement", "attempt"] as const)(
+    "preserves a staged ID-only %s when an identity-free callback follows",
+    async (callback) => {
+      const { f, admitted, retained, replayCtx, match } =
+        await retainedReplayFixture();
+      const lookup = deferred<typeof match | undefined>(undefined);
+      f.sessionLookup.mockReturnValueOnce(lookup.promise);
+      const pending = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+      const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+      const anonymous = { ...replayCtx, sessionId: undefined };
+      if (callback === "settlement") {
+        await settleRun(f.handlers, replayCtx, "valid reply");
+        await settleRun(f.handlers, anonymous, "unidentified reply");
+      } else {
+        for (const [context, reply] of [
+          [replayCtx, "valid reply"],
+          [anonymous, "unidentified reply"],
+        ] as const) {
+          await f.handlers.onAgentEnd(
+            {
+              success: true,
+              messages: [{ role: "assistant", content: reply }],
+            },
+            context,
+          );
+        }
+        await settleRun(f.handlers, replayCtx);
+      }
+      expect(finalize).not.toHaveBeenCalled();
+      lookup.resolve(match);
+      await pending;
+
+      expect(finalize).toHaveBeenCalledOnce();
+      expect(f.tracker.getTurnState(ctx.sessionId, retained)).toMatchObject({
+        result: "valid reply",
+        timestamps: { end: expect.any(String) },
+      });
+      expect(f.turnAssociations.resolve(replayCtx.runId)).toBeUndefined();
+    },
+  );
+
   it.each(["current", "history"] as const)(
     "keeps a finalized legacy run from %s terminal after reload",
     async (location) => {
@@ -1143,6 +1337,115 @@ describe("asynchronous prompt identity", () => {
       expect(f.selector).toHaveBeenCalledOnce();
     },
   );
+
+  it.each(["during lookup", "after lookup"] as const)(
+    "settles a rebuilt current admission excluded by chat scope (%s)",
+    async (settlementTiming) => {
+      const f = fixture();
+      await f.handlers.onBeforePromptBuild(admitted, ctx);
+      const turnKey = f.tracker.getCurrentState(ctx.sessionId)!.turnKey!;
+      const rebuild = { ...noKey, runId: "rebuild" };
+      const lookup = deferred<typeof match | undefined>(undefined);
+      f.sessionLookup.mockReturnValueOnce(lookup.promise);
+      const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+      const warn = vi.spyOn(logger, "warn");
+      const pending = f.handlers.onBeforePromptBuild(admitted, rebuild);
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+      f.setConfig(
+        resolveConfig({ routing: { scope: { chatTypes: ["group"] } } }),
+      );
+
+      if (settlementTiming === "during lookup")
+        await settleRun(f.handlers, rebuild);
+      expect(finalize).not.toHaveBeenCalled();
+      lookup.resolve(match);
+      const result = await pending;
+      expect(result?.appendSystemContext).toContain("<working_set_skills>");
+      expect(result?.prependContext).toBeUndefined();
+      if (settlementTiming === "after lookup") {
+        expect(f.turnAssociations.resolve(rebuild.runId)?.turnKey).toBe(
+          turnKey,
+        );
+        await settleRun(f.handlers, rebuild);
+      }
+
+      expect(f.tracker.getCurrentState(ctx.sessionId)).toMatchObject({
+        turnKey,
+        timestamps: { end: expect.any(String) },
+      });
+      expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(false);
+      await settleRun(f.handlers, rebuild);
+      expect(finalize).toHaveBeenCalledOnce();
+      expect(f.selector).toHaveBeenCalledOnce();
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("before_prompt_build hook error"),
+      );
+    },
+  );
+
+  it("joins pending preparation before a rebuild exits prompt routing", async () => {
+    const f = fixture();
+    const release = deferred<void>(undefined);
+    const prepareTurn = f.tracker.preparePromptTurn.bind(f.tracker);
+    const prepare = vi
+      .spyOn(f.tracker, "preparePromptTurn")
+      .mockImplementationOnce(async (params) => {
+        await release.promise;
+        return prepareTurn(params);
+      });
+    const first = f.handlers.onBeforePromptBuild(admitted, ctx);
+    await until(() => prepare.mock.calls.length === 1);
+    const rebuild = { ...noKey, runId: "rebuild" };
+    const lookup = deferred<typeof match | undefined>(undefined);
+    f.sessionLookup.mockReturnValueOnce(lookup.promise);
+    let lookupReleased = false;
+    let rebuiltAfterLookup = false;
+    const pending = f.handlers.onBeforePromptBuild(admitted, {
+      ...rebuild,
+      inputProvenance: { kind: "internal_system" },
+      hookInvocation: {
+        assertActive: () => {
+          if (lookupReleased) rebuiltAfterLookup = true;
+        },
+      },
+    });
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    await settleRun(f.handlers, rebuild);
+    lookupReleased = true;
+    lookup.resolve(match);
+    await until(() => rebuiltAfterLookup);
+
+    release.resolve();
+    await Promise.all([first, pending]);
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(
+      f.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+    ).toBeTruthy();
+    expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(false);
+  });
+
+  it("clears Review activity for an untracked skipped run settled during lookup", async () => {
+    const f = fixture();
+    f.setConfig(
+      resolveConfig({ routing: { scope: { chatTypes: ["group"] } } }),
+    );
+    const lookup = deferred<typeof match | undefined>(undefined);
+    f.sessionLookup.mockReturnValueOnce(lookup.promise);
+    const pending = f.handlers.onBeforePromptBuild(admitted, noKey);
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    await settleRun(f.handlers, {
+      runId: ctx.runId,
+      sessionKey: match.sessionKey,
+    });
+    expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(true);
+    lookup.resolve(match);
+    await pending;
+
+    expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(false);
+    expect(f.turnAssociations.hasRun(ctx.runId)).toBe(true);
+    expect(f.tracker.getCurrentState(ctx.sessionId)?.turnKey).toBeUndefined();
+    expect(f.selector).not.toHaveBeenCalled();
+  });
 
   it("keeps a fresh run bindable after an unrelated key-only settlement during lookup", async () => {
     const f = fixture();
