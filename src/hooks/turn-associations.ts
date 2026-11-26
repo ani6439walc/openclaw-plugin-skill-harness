@@ -543,11 +543,15 @@ export class TurnAssociationRegistry {
     const recordedKey = entry.sessionKey ?? entry.association?.sessionKey;
     if (
       (sessionId && recordedId && recordedId !== sessionId) ||
-      (sessionKey && recordedKey && recordedKey !== sessionKey)
+      (sessionKey && recordedKey && recordedKey !== sessionKey) ||
+      !(
+        (sessionId && recordedId === sessionId) ||
+        (sessionKey && recordedKey === sessionKey)
+      )
     )
       return;
     entry.inFlight = false;
-    if (entry.state === "pending") entry.state = "terminal";
+    entry.state = "terminal";
     entry.touchedAt = this.now();
   }
 

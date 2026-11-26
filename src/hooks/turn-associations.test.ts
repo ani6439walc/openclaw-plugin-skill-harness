@@ -3,6 +3,41 @@ import { TurnAssociationRegistry } from "./turn-associations.js";
 
 describe("TurnAssociationRegistry", () => {
   describe("native correlation fences", () => {
+    it.each([
+      { recordedKey: undefined, expected: { sessionKey: "unrelated" } },
+      { recordedKey: "canonical", expected: {} },
+      {
+        recordedKey: "canonical",
+        expected: { sessionId: "session-a", sessionKey: "unrelated" },
+      },
+      {
+        recordedKey: "canonical",
+        expected: { sessionId: "other-session", sessionKey: "canonical" },
+      },
+    ])(
+      "keeps a pending fence bindable without a conflict-free identity match ($expected)",
+      ({ recordedKey, expected }) => {
+        const registry = new TurnAssociationRegistry();
+        const owner = {};
+        const association = {
+          sessionId: "session-a",
+          sessionKey: "canonical",
+          turnKey: "turn-a",
+        };
+        registry.claimNativeRun(
+          "run-a",
+          owner,
+          association.sessionId,
+          recordedKey,
+        );
+        registry.markRunSettled("run-a", expected);
+        expect(registry.hasActiveSession(association.sessionId)).toBe(true);
+        expect(registry.bindNativeRun("run-a", owner, association)).toBe(
+          "bound",
+        );
+      },
+    );
+
     it("keeps a pending normalized alias known until its owner binds it", () => {
       const registry = new TurnAssociationRegistry();
       const owner = {};

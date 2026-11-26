@@ -93,7 +93,7 @@ async function until(predicate: () => boolean) {
 }
 function settleRun(
   handlers: ReturnType<typeof createHookHandlers>,
-  context: Pick<typeof ctx, "runId" | "sessionId"> & { sessionKey?: string },
+  context: { runId: string; sessionId?: string; sessionKey?: string },
 ) {
   return handlers.onAgentLifecycleEvent({
     ...context,
@@ -671,6 +671,8 @@ describe("native admission identity", () => {
 
   it.each([
     "settlement only",
+    "key-only settlement",
+    "settlement without identity",
     "with attempt",
     "wrong attempt key",
     "wrong settlement key",
@@ -699,9 +701,18 @@ describe("native admission identity", () => {
       const settledCtx = {
         ...replayCtx,
         sessionId:
-          scenario === "wrong session ID" ? "another-session" : ctx.sessionId,
+          scenario === "wrong session ID"
+            ? "another-session"
+            : scenario === "key-only settlement" ||
+                scenario === "settlement without identity"
+              ? undefined
+              : ctx.sessionId,
         sessionKey:
-          scenario === "wrong settlement key" ? wrongKey : match.sessionKey,
+          scenario === "wrong settlement key"
+            ? wrongKey
+            : scenario === "settlement without identity"
+              ? undefined
+              : match.sessionKey,
       };
       await settleRun(f.handlers, settledCtx);
       const hasAttempt =
@@ -737,7 +748,10 @@ describe("native admission identity", () => {
         expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(false);
         return;
       }
-      const shouldSettle = scenario === "settlement only" || hasAttempt;
+      const shouldSettle =
+        scenario === "settlement only" ||
+        scenario === "key-only settlement" ||
+        hasAttempt;
       expect(finalize).toHaveBeenCalledTimes(shouldSettle ? 1 : 0);
       const turn = f.tracker.getTurnState(ctx.sessionId, retained);
       if (shouldSettle) expect(turn?.timestamps?.end).toBeTruthy();
@@ -821,6 +835,113 @@ describe("native admission identity", () => {
     expect(f.turnAssociations.resolve(replayCtx.runId)).toBeUndefined();
     expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(newer);
   });
+
+  it.each([
+    { callback: "settlement", validFirst: true },
+    { callback: "settlement", validFirst: false },
+    { callback: "attempt", validFirst: true },
+    { callback: "attempt", validFirst: false },
+  ])(
+    "keeps the matching replay $callback across different keys (valid first: $validFirst)",
+    async ({ callback, validFirst }) => {
+      const { f, admitted, retained, newer, replayCtx, match } =
+        await retainedReplayFixture();
+      const lookup = deferred<typeof match | undefined>(undefined);
+      f.sessionLookup.mockReturnValueOnce(lookup.promise);
+      const pending = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+      const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+      const valid = { ...replayCtx, sessionKey: match.sessionKey };
+      const wrong = { ...replayCtx, sessionKey: "agent:main:direct:other" };
+      for (const observed of validFirst ? [valid, wrong] : [wrong, valid]) {
+        if (callback === "settlement") await settleRun(f.handlers, observed);
+        else
+          await f.handlers.onAgentEnd(
+            {
+              success: true,
+              messages: [
+                {
+                  role: "assistant",
+                  content: observed === valid ? "valid reply" : "wrong reply",
+                },
+              ],
+            },
+            observed,
+          );
+      }
+      if (callback === "attempt") await settleRun(f.handlers, valid);
+      expect(finalize).not.toHaveBeenCalled();
+      lookup.resolve(match);
+      await pending;
+
+      expect(finalize).toHaveBeenCalledOnce();
+      expect(f.tracker.getTurnState(ctx.sessionId, retained)).toMatchObject({
+        timestamps: { end: expect.any(String) },
+      });
+      expect(f.tracker.getTurnState(ctx.sessionId, retained)?.result).toBe(
+        callback === "attempt" ? "valid reply" : undefined,
+      );
+      expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(newer);
+    },
+  );
+
+  it.each([
+    { withAttempt: false, alreadyBound: false },
+    { withAttempt: true, alreadyBound: false },
+    { withAttempt: true, alreadyBound: true },
+  ])(
+    "drains the newer SDK key without redelivery (attempt: $withAttempt, already bound: $alreadyBound)",
+    async ({ withAttempt, alreadyBound }) => {
+      const { f, admitted, retained, newer, replayCtx, match } =
+        await retainedReplayFixture();
+      const oldKey = "agent:main:direct:old";
+      const firstLookup = deferred<typeof match | undefined>(undefined);
+      const secondLookup = deferred<typeof match | undefined>(undefined);
+      f.sessionLookup
+        .mockReturnValueOnce(firstLookup.promise)
+        .mockReturnValueOnce(secondLookup.promise);
+      const first = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+      const resolveFirst = async () => {
+        firstLookup.resolve({ ...match, sessionKey: oldKey });
+        await first;
+        expect(f.turnAssociations.resolve(replayCtx.runId)).toMatchObject({
+          turnKey: retained,
+          sessionKey: oldKey,
+        });
+      };
+      if (alreadyBound) await resolveFirst();
+      const second = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 2);
+      const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+      const callbackCtx = { ...replayCtx, sessionKey: match.sessionKey };
+      if (withAttempt)
+        await f.handlers.onAgentEnd(
+          {
+            success: true,
+            messages: [{ role: "assistant", content: "new key reply" }],
+          },
+          callbackCtx,
+        );
+      await settleRun(f.handlers, callbackCtx);
+      if (!alreadyBound) await resolveFirst();
+      expect(finalize).not.toHaveBeenCalled();
+      expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(newer);
+
+      secondLookup.resolve(match);
+      await second;
+
+      expect(finalize).toHaveBeenCalledOnce();
+      expect(f.turnAssociations.resolve(replayCtx.runId)).toBeUndefined();
+      expect(f.tracker.getTurnState(ctx.sessionId, retained)).toMatchObject({
+        timestamps: { end: expect.any(String) },
+      });
+      expect(f.tracker.getTurnState(ctx.sessionId, retained)?.result).toBe(
+        withAttempt ? "new key reply" : undefined,
+      );
+      expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(newer);
+    },
+  );
 
   it.each(["current", "history"] as const)(
     "keeps a finalized legacy run from %s terminal after reload",
@@ -973,6 +1094,83 @@ describe("asynchronous prompt identity", () => {
     });
     expect(f.selector).toHaveBeenCalledTimes(1);
     expect(f.listSessionEntries).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "settles a current admission on its rebuilt run during lookup (attempt: %s)",
+    async (withAttempt) => {
+      const f = fixture();
+      await f.handlers.onBeforePromptBuild(admitted, ctx);
+      const turnKey = f.tracker.getCurrentState(ctx.sessionId)!.turnKey!;
+      const rebuild = { ...noKey, runId: "rebuild" };
+      const lookup = deferred<typeof match | undefined>(undefined);
+      f.sessionLookup.mockReturnValueOnce(lookup.promise);
+      const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+      const warn = vi.spyOn(logger, "warn");
+      const pending = f.handlers.onBeforePromptBuild(admitted, rebuild);
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+      if (withAttempt)
+        await f.handlers.onAgentEnd(
+          {
+            success: true,
+            messages: [{ role: "assistant", content: "rebuilt reply" }],
+          },
+          rebuild,
+        );
+      await settleRun(f.handlers, rebuild);
+      expect(finalize).not.toHaveBeenCalled();
+      lookup.resolve(match);
+      const result = await pending;
+
+      expect(result?.appendSystemContext).toContain("<working_set_skills>");
+      expect(result?.prependContext).toBeUndefined();
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("before_prompt_build hook error"),
+      );
+      expect(finalize).toHaveBeenCalledOnce();
+      expect(f.tracker.getCurrentState(ctx.sessionId)).toMatchObject({
+        turnKey,
+        timestamps: { end: expect.any(String) },
+      });
+      expect(f.tracker.getCurrentState(ctx.sessionId)?.result).toBe(
+        withAttempt ? "rebuilt reply" : undefined,
+      );
+      expect(f.turnAssociations.hasRun(rebuild.runId)).toBe(true);
+      expect(f.turnAssociations.resolve(rebuild.runId)).toBeUndefined();
+      expect(f.turnAssociations.resolve(ctx.runId)).toBeUndefined();
+      await settleRun(f.handlers, rebuild);
+      expect(finalize).toHaveBeenCalledOnce();
+      expect(f.selector).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("keeps a fresh run bindable after an unrelated key-only settlement during lookup", async () => {
+    const f = fixture();
+    const lookup = deferred<typeof match | undefined>(undefined);
+    f.sessionLookup.mockReturnValueOnce(lookup.promise);
+    const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+    const pending = f.handlers.onBeforePromptBuild(admitted, noKey);
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    await settleRun(f.handlers, {
+      runId: ctx.runId,
+      sessionKey: "agent:main:unrelated",
+    });
+    expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(true);
+    lookup.resolve(match);
+    await pending;
+
+    const current = f.tracker.getCurrentState(ctx.sessionId);
+    expect(current?.timestamps?.end).toBeUndefined();
+    expect(f.turnAssociations.resolve(ctx.runId)).toMatchObject({
+      sessionKey: match.sessionKey,
+      turnKey: current?.turnKey,
+    });
+    expect(finalize).not.toHaveBeenCalled();
+    await settleRun(f.handlers, ctx);
+    expect(finalize).toHaveBeenCalledOnce();
+    expect(
+      f.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+    ).toBeTruthy();
   });
 
   it.each(["native", "legacy-named", "legacy-anonymous"])(
