@@ -2,7 +2,7 @@ import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import { getOrCache } from "../singleton.js";
 import path from "node:path";
 import * as fs from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { RecentTurn } from "../types.js";
 import type { ReviewSnapshot, ReviewState } from "../review/types.js";
 import matter from "gray-matter";
@@ -102,6 +102,7 @@ export interface IntentState {
 }
 
 export interface SessionState {
+  nativeAdmissionDigest?: string;
   skillTurnNumber?: number;
   /** Distinguishes repeated anonymous inputs before an exact terminal notification. */
   assistantReplyObserved?: true;
@@ -141,17 +142,52 @@ export interface SessionData {
 export interface PromptTurnIdentity {
   turnKey: string;
   reused: boolean;
+  finalized?: true;
 }
 
 export type PromptTurnPrepareResult =
   | { status: "applied"; identity: PromptTurnIdentity }
   | { status: "reused"; identity: PromptTurnIdentity }
+  | { status: "ambiguous" }
   | { status: "retryable-failure" };
 
 type PersistedPromptTurnPrepareResult = Exclude<
   PromptTurnPrepareResult,
   { status: "retryable-failure" }
 >;
+
+function digestNativeAdmission(
+  sessionId: string,
+  agentId: string,
+  admissionId: string,
+): string {
+  // The SDK identity is opaque. Encode the raw tuple, including empty strings.
+  return createHash("sha256")
+    .update(JSON.stringify([agentId, sessionId, admissionId]))
+    .digest("hex");
+}
+
+function findNativeTurn(
+  session: SessionData,
+  digest: string,
+): PromptTurnIdentity | "ambiguous" | undefined {
+  const turns = [...(session.history ?? []), session.current];
+  const matches = turns.filter((turn) => turn.nativeAdmissionDigest === digest);
+  if (!matches.length) return;
+  const match = matches[0];
+  const turnKey = match.turnKey;
+  if (
+    matches.length !== 1 ||
+    !turnKey?.trim() ||
+    turns.some((turn) => turn !== match && turn.turnKey === turnKey)
+  )
+    return "ambiguous";
+  return {
+    turnKey,
+    reused: true,
+    ...(match.timestamps?.end ? { finalized: true as const } : {}),
+  };
+}
 
 export function resolveTurnEventId(
   sessionId: string,
@@ -672,18 +708,43 @@ export class SessionTracker {
       : { acquired: true, result: locked };
   }
 
+  /** A cached replay hint for prompt ownership; preparation rechecks disk under lock. */
+  getNativeTurnIdentity(
+    sessionId: string,
+    agentId: string,
+    nativeAdmissionId: string,
+  ): PromptTurnIdentity | undefined {
+    const session = this.sessionData.get(sessionId);
+    if (!session) return;
+    const identity = findNativeTurn(
+      session,
+      digestNativeAdmission(sessionId, agentId, nativeAdmissionId),
+    );
+    return identity === "ambiguous" ? undefined : identity;
+  }
+
   async preparePromptTurn(params: {
     sessionId: string;
     sessionKey?: string;
     agentId: string;
     runId?: string;
     forceNew?: boolean;
+    nativeAdmissionId?: string;
     input: string;
     startedAt: string;
     recentTurns?: readonly RecentTurn[];
     assertActive?: () => void;
   }): Promise<PromptTurnPrepareResult> {
-    const requestedRunId = params.forceNew ? undefined : params.runId?.trim();
+    const nativeAdmissionDigest =
+      params.nativeAdmissionId === undefined
+        ? undefined
+        : digestNativeAdmission(
+            params.sessionId,
+            params.agentId,
+            params.nativeAdmissionId,
+          );
+    const forceNew = params.forceNew || nativeAdmissionDigest !== undefined;
+    const requestedRunId = forceNew ? undefined : params.runId?.trim();
     try {
       const outcome =
         await this.mutateSession<PersistedPromptTurnPrepareResult>({
@@ -692,6 +753,19 @@ export class SessionTracker {
           mutate: (session) => {
             params.assertActive?.();
             const current = session.current;
+            if (nativeAdmissionDigest !== undefined) {
+              const identity = findNativeTurn(session, nativeAdmissionDigest);
+              if (identity === "ambiguous")
+                return {
+                  result: { status: "ambiguous" as const },
+                  changed: false,
+                };
+              if (identity)
+                return {
+                  result: { status: "reused" as const, identity },
+                  changed: false,
+                };
+            }
             // Rebuild a lost run association without rotating a newer turn or
             // applying the replayed prompt's transcript to its session state.
             if (
@@ -716,7 +790,7 @@ export class SessionTracker {
             if (observedReply) current.assistantReplyObserved = true;
 
             const reusableWithoutRunId =
-              !params.forceNew &&
+              !forceNew &&
               !requestedRunId &&
               !current.assistantReplyObserved &&
               !current.timestamps?.end &&
@@ -752,6 +826,9 @@ export class SessionTracker {
             session.agentId = params.agentId;
             session.current = {
               turnKey,
+              ...(nativeAdmissionDigest !== undefined
+                ? { nativeAdmissionDigest }
+                : {}),
               input: params.input,
               intent: {},
               timestamps: { start: params.startedAt },

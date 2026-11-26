@@ -448,18 +448,22 @@ export function createHookHandlers(deps: HookDeps) {
               params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
             agentId: params.routing.effectiveAgentId,
             forceNew: true,
+            nativeAdmissionId: request.admissionId,
             input: params.latestUserMessage,
             startedAt: new Date().toISOString(),
             recentTurns: params.recentTurns,
             assertActive,
           });
           assertActive();
-          if (prepared.status === "retryable-failure") return;
+          if (!("identity" in prepared)) return;
           return {
             sessionId,
             sessionKey:
               params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
             turnKey: prepared.identity.turnKey,
+            ...(prepared.identity.finalized
+              ? { finalized: true as const }
+              : {}),
           };
         },
       );
@@ -472,6 +476,13 @@ export function createHookHandlers(deps: HookDeps) {
         const reservation = turnAssociations.reserveAnonymous();
         if (reservation.status === "reserved")
           turnAssociations.bindAnonymous(reservation.token, association);
+      }
+      if (association.finalized) {
+        request.association = association;
+        promptExecutions.finalizeAssociation(association);
+        turnAssociations.markAssociationTerminal(association);
+        toolFallbacks.markAssociationTerminal(association);
+        return;
       }
       return association;
     }
@@ -548,7 +559,7 @@ export function createHookHandlers(deps: HookDeps) {
       if (params.routing.request)
         promptExecutions.assertRequestCurrent(params.routing.request);
       params.ctx.hookInvocation?.assertActive();
-      if (prepared.status === "retryable-failure") {
+      if (!("identity" in prepared)) {
         if (reservation.status === "reserved") {
           turnAssociations.release(reservation.token);
         }
@@ -1144,13 +1155,17 @@ export function createHookHandlers(deps: HookDeps) {
             ).latestUserMessage.trim()
           : undefined;
       request = ownerSessionId
-        ? promptExecutions.claimRequest({
-            agentId: resolveStatusUpdateAgentId(ctx),
-            sessionId: ownerSessionId,
-            admissionId,
-            runId,
-            legacyInput,
-          })
+        ? promptExecutions.claimRequest(
+            {
+              agentId: resolveStatusUpdateAgentId(ctx),
+              sessionId: ownerSessionId,
+              admissionId,
+              runId,
+              legacyInput,
+            },
+            (agentId, sessionId, id) =>
+              tracker.getNativeTurnIdentity?.(sessionId, agentId, id),
+          )
         : undefined;
       if (admissionId !== undefined && ctx.runId) {
         // This is an event-rejection fence, not a turn reservation or admission.
@@ -1159,6 +1174,12 @@ export function createHookHandlers(deps: HookDeps) {
           request ?? {},
           ownerSessionId,
         );
+      }
+      if (request?.retainedReplay) {
+        const old = request.retainedReplay;
+        if (runId) turnAssociations.bindNativeRun(runId, request, old);
+        if (old.finalized) turnAssociations.markAssociationTerminal(old);
+        return;
       }
       const assertRequestActive = (allowFinalized = false) => {
         ctx.hookInvocation?.assertActive();
@@ -1235,7 +1256,7 @@ export function createHookHandlers(deps: HookDeps) {
         latestUserMessage,
         recentTurns: extractRecentTurns(event.messages),
       });
-      assertRequestActive();
+      assertRequestActive(true);
       if (!routing.association) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }

@@ -635,7 +635,7 @@ including empty or whitespace-only strings. Scope them by the raw agent/session
 ID pair, never by run ID or input text. Claim ownership before the first await.
 One admission shares turn preparation and its pending or terminal selection
 Promise across rebuilds, including failure and cancellation. A new admission
-forces a fresh tracker turn without changing the persisted schema. Superseded
+gets its own tracker UUID. Store a digest of the raw agent/session/admission tuple with that UUID. Check it under the session lock before allocating another row. A replay can rebind a pending row to its terminal hook, while a completed row stays terminal across registration reloads. Superseded
 or finalized admissions must never reserve another turn or repeat selection.
 A still-current finalized admission keeps available static guidance; a stale
 invocation may return no context. Omitted admission IDs preserve the
@@ -669,8 +669,7 @@ disables unknown-run fallback for that generation. Converting a legacy alias to
 a native fence retains its original budget allocation. Session cleanup reclaims
 owned entries; cross-session ambiguous aliases remain fenced until disposal.
 Disposal clears the request/admission ledgers; alias fences remain owned by the
-retired handler generation. Do not persist admission IDs or reset existing
-session history to implement these contracts.
+retired handler generation. Persist only the digest on the session row. Pre-upgrade native rows have no admission digest and cannot be matched by run alias or text. Preserve their history.
 
 ## Documentation boundaries
 

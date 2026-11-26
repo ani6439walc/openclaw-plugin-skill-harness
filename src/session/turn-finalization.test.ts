@@ -414,6 +414,133 @@ describe("SessionTracker exact-turn finalization", () => {
     ).toBeUndefined();
   });
 
+  it("reuses durable native identities across reload, independently of aliases, text and current row", async () => {
+    const base = {
+      sessionId: "session-a",
+      agentId: "main",
+      runId: "shared-alias",
+      forceNew: true,
+      input: "continue",
+      startedAt: "2026-08-12T00:00:00.000Z",
+    };
+    const prepareNative = async (admissionId: string) => {
+      const result = await tracker.preparePromptTurn({
+        ...base,
+        nativeAdmissionId: admissionId,
+      });
+      if (!("identity" in result)) throw new Error(result.status);
+      return result.identity;
+    };
+    const completed = await prepareNative("private-admission");
+    const finish = (turnKey: string) =>
+      tracker.finalizeTurnFromAgentEnd({
+        sessionId: "session-a",
+        expectedTurnKey: turnKey,
+        endedAt: "2026-08-12T00:00:03.000Z",
+      });
+    const load = (turnKey: string) =>
+      tracker.mergeTurnAndPersist({
+        sessionId: "session-a",
+        expectedTurnKey: turnKey,
+        data: { matchedSkills: ["alpha"] },
+      });
+    await load(completed.turnKey);
+    await finish(completed.turnKey);
+    const pending = await prepareNative("");
+    await load(pending.turnKey);
+    const newest = await prepareNative(" ");
+    expect(
+      new Set([completed.turnKey, pending.turnKey, newest.turnKey]).size,
+    ).toBe(3);
+    const file = sessionsPath("session-a.json", root);
+    const saved = fs.readFileSync(file, "utf8");
+    expect(saved).not.toContain("private-admission");
+    expect(JSON.parse(saved).current.nativeAdmissionDigest).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
+    tracker = SessionTracker.create(root);
+    expect(
+      tracker.getNativeTurnIdentity("session-a", "main", "private-admission"),
+    ).toEqual({
+      turnKey: completed.turnKey,
+      reused: true,
+      finalized: true,
+    });
+    expect(
+      tracker.getNativeTurnIdentity("session-a", "other", ""),
+    ).toBeUndefined();
+    expect(
+      tracker.getNativeTurnIdentity("other-session", "main", ""),
+    ).toBeUndefined();
+    expect(await prepareNative("private-admission")).toEqual({
+      turnKey: completed.turnKey,
+      reused: true,
+      finalized: true,
+    });
+    expect(await finish(completed.turnKey)).toBe("already-finalized");
+    expect(await prepareNative("")).toEqual({
+      turnKey: pending.turnKey,
+      reused: true,
+    });
+    expect(fs.readFileSync(file, "utf8")).toBe(saved);
+    expect(await finish(pending.turnKey)).toBe("applied");
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", pending.turnKey)
+        ?.turnNumber,
+    ).toBe(2);
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", completed.turnKey)
+        ?.turnNumber,
+    ).toBe(1);
+    expect(tracker.getCurrentState("session-a")?.turnKey).toBe(newest.turnKey);
+  });
+
+  it("rejects ambiguous durable native identities without allocating a UUID or overwriting either row", async () => {
+    const params = {
+      sessionId: "session-a",
+      agentId: "main",
+      forceNew: true,
+      nativeAdmissionId: "native",
+      input: "same",
+      startedAt: "2026-08-12T00:00:00.000Z",
+    };
+    const first = await tracker.preparePromptTurn(params);
+    expect(first.status).toBe("applied");
+    const file = sessionsPath("session-a.json", root);
+    const saved = JSON.parse(fs.readFileSync(file, "utf8"));
+    for (const other of [
+      { ...saved.current, turnKey: "other-key" },
+      { ...saved.current, nativeAdmissionDigest: undefined },
+    ]) {
+      const damaged = JSON.stringify({ ...saved, history: [other] });
+      fs.writeFileSync(file, damaged);
+      expect(await tracker.preparePromptTurn(params)).toEqual({
+        status: "ambiguous",
+      });
+      expect(fs.readFileSync(file, "utf8")).toBe(damaged);
+    }
+  });
+
+  it("never infers a native identity from a legacy row with matching alias and input", async () => {
+    await prepare("legacy-alias", "same");
+    const native = await tracker.preparePromptTurn({
+      sessionId: "session-a",
+      agentId: "main",
+      forceNew: true,
+      runId: "legacy-alias",
+      nativeAdmissionId: "legacy-alias",
+      input: "same",
+      startedAt: "2026-08-12T00:00:03.000Z",
+    });
+    expect(native.status).toBe("applied");
+    if (native.status !== "applied")
+      throw new Error("missing distinct native turn");
+    expect(native.identity.turnKey).not.toBe("legacy-alias");
+    expect(
+      tracker.getTurnState("session-a", "legacy-alias")?.nativeAdmissionDigest,
+    ).toBeUndefined();
+  });
+
   it.each([false, true])(
     "counts a staged full skill_view result once (already finalized: %s)",
     async (alreadyFinalized) => {

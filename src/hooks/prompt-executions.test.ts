@@ -43,6 +43,31 @@ describe("PromptExecutions request ownership", () => {
     expect(() => executions.assertRequestCurrent(owners[0]!)).toThrow();
   });
 
+  it("keeps a newer owner active when an older persisted native admission replays", () => {
+    const executions = create();
+    const scope = { agentId: "main", sessionId: "same-session" };
+    const newer = executions.claimRequest({ ...scope, admissionId: "new" })!;
+    const resolve = vi.fn(() => ({
+      turnKey: "old-turn",
+      finalized: true as const,
+    }));
+    const older = executions.claimRequest(
+      { ...scope, admissionId: "old" },
+      resolve,
+    )!;
+    expect(older.retainedReplay).toMatchObject({
+      sessionId: scope.sessionId,
+      turnKey: "old-turn",
+      finalized: true,
+    });
+    expect(
+      executions.claimRequest({ ...scope, admissionId: "old" }, resolve),
+    ).toBe(older);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(() => executions.assertRequestCurrent(older)).toThrow();
+    expect(() => executions.assertRequestCurrent(newer)).not.toThrow();
+  });
+
   it("keeps tuple scopes distinct when IDs contain delimiter characters", () => {
     const executions = create();
     const first = executions.claimRequest({

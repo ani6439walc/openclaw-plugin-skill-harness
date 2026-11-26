@@ -13,6 +13,7 @@ export interface PromptRequestOwner<T> {
   readonly runId?: string;
   readonly legacyInput?: string;
   readonly controller: AbortController;
+  readonly retainedReplay?: TurnAssociation;
   state: "current" | "finalized" | "superseded";
   callers: number;
   association?: TurnAssociation;
@@ -53,13 +54,20 @@ export class PromptExecutions<T> {
   }
 
   /** Claim request order synchronously, before any identity lookup can yield. */
-  claimRequest(params: {
-    agentId: string;
-    sessionId: string;
-    admissionId?: string;
-    runId?: string;
-    legacyInput?: string;
-  }): PromptRequestOwner<T> | undefined {
+  claimRequest(
+    params: {
+      agentId: string;
+      sessionId: string;
+      admissionId?: string;
+      runId?: string;
+      legacyInput?: string;
+    },
+    findRetained?: (
+      agentId: string,
+      sessionId: string,
+      admissionId: string,
+    ) => { turnKey: string; finalized?: true } | undefined,
+  ): PromptRequestOwner<T> | undefined {
     this.assertActive();
     const scope = JSON.stringify([params.agentId, params.sessionId]);
     const current = this.requests.get(scope);
@@ -79,17 +87,33 @@ export class PromptExecutions<T> {
       current.callers++;
       return current;
     }
-    if (current) this.supersede(current);
-    this.requests.delete(scope);
-    // Keep tombstones instead of forgetting an ID and accidentally routing it again.
+    // A retained admission from a prior registration must not cancel a newer
+    // request which already owns this scope, even while its SDK lookup awaits.
+    const retained =
+      current && params.admissionId !== undefined
+        ? findRetained?.(params.agentId, params.sessionId, params.admissionId)
+        : undefined;
+    if (!retained) {
+      if (current) this.supersede(current);
+      this.requests.delete(scope);
+    }
     if (native && this.nativeCount >= this.maxNativeAdmissions) return;
     const request: PromptRequestOwner<T> = {
       ...params,
       controller: new AbortController(),
-      state: "current",
+      state: retained ? "superseded" : "current",
+      ...(retained
+        ? {
+            retainedReplay: {
+              sessionId: params.sessionId,
+              turnKey: retained.turnKey,
+              finalized: retained.finalized,
+            },
+          }
+        : {}),
       callers: 1,
     };
-    this.requests.set(scope, request);
+    if (!retained) this.requests.set(scope, request);
     if (native) {
       const entries =
         this.admissions.get(scope) ?? new Map<string, PromptRequestOwner<T>>();

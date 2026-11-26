@@ -33,7 +33,7 @@ async function persistStateFixture(
     startedAt,
   });
   expect(prepared.status).not.toBe("retryable-failure");
-  if (prepared.status === "retryable-failure") {
+  if (!("identity" in prepared)) {
     throw new Error("failed to prepare fixture turn");
   }
 
@@ -518,10 +518,7 @@ describe("SessionTracker", () => {
       const second = await tracker.preparePromptTurn(params);
       expect(first.status).toBe("applied");
       expect(second.status).toBe("applied");
-      if (
-        first.status === "retryable-failure" ||
-        second.status === "retryable-failure"
-      ) {
+      if (!("identity" in first) || !("identity" in second)) {
         throw new Error("failed to prepare forced turns");
       }
       const uuid =
@@ -568,10 +565,7 @@ describe("SessionTracker", () => {
       });
       expect(first.status).toBe("applied");
       expect(second.status).toBe("applied");
-      if (
-        first.status === "retryable-failure" ||
-        second.status === "retryable-failure"
-      ) {
+      if (!("identity" in first) || !("identity" in second)) {
         throw new Error("failed to prepare anonymous turns");
       }
       expect(second.identity.reused).toBe(false);
@@ -598,7 +592,7 @@ describe("SessionTracker", () => {
       };
       const first = await tracker.preparePromptTurn(params);
       expect(first.status).toBe("applied");
-      if (first.status === "retryable-failure") {
+      if (!("identity" in first)) {
         throw new Error("failed to prepare anonymous turn");
       }
       const file = sessionsPath("session-a.json", tempDir);
