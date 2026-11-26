@@ -13,7 +13,7 @@ export interface PromptRequestOwner<T> {
   readonly runId?: string;
   readonly legacyInput?: string;
   readonly controller: AbortController;
-  readonly retainedReplay?: TurnAssociation;
+  retainedReplay?: TurnAssociation;
   state: "current" | "finalized" | "superseded";
   callers: number;
   association?: TurnAssociation;
@@ -158,14 +158,14 @@ export class PromptExecutions<T> {
     request: PromptRequestOwner<T>,
     operation: () => Promise<string | undefined>,
   ): Promise<string | undefined> {
-    this.assertRequestCurrent(request);
+    this.assertRequestCurrent(request, true);
     if (request.admissionId !== undefined && request.lookup)
       return request.lookup;
     const work = this.track(
       Promise.resolve().then(async () => {
-        this.assertRequestCurrent(request);
+        this.assertRequestCurrent(request, true);
         const key = await operation();
-        this.assertRequestCurrent(request);
+        this.assertRequestCurrent(request, true);
         request.resolvedSessionKey = key;
         return key;
       }),
@@ -178,13 +178,15 @@ export class PromptExecutions<T> {
     request: PromptRequestOwner<T>,
     operation: () => Promise<TurnAssociation | undefined>,
   ): Promise<TurnAssociation | undefined> {
-    this.assertRequestCurrent(request);
+    this.assertRequestCurrent(request, true);
     if (request.preparation) return request.preparation;
+    if (request.state === "finalized")
+      return Promise.resolve(request.association);
     const work = this.track(
       Promise.resolve().then(async () => {
         this.assertRequestCurrent(request);
         const association = await operation();
-        this.assertRequestCurrent(request);
+        this.assertRequestCurrent(request, association?.finalized === true);
         return association;
       }),
     );
@@ -232,6 +234,22 @@ export class PromptExecutions<T> {
   }
 
   finalizeAssociation(association: TurnAssociation): void {
+    for (const entries of this.admissions.values()) {
+      if (entries.values().next().value?.sessionId !== association.sessionId)
+        continue;
+      for (const request of entries.values()) {
+        const owner = request.association ?? request.retainedReplay;
+        if (owner?.turnKey !== association.turnKey) continue;
+        if (request.association)
+          request.association = { ...request.association, finalized: true };
+        if (request.retainedReplay)
+          request.retainedReplay = {
+            ...request.retainedReplay,
+            finalized: true,
+          };
+        request.state = "finalized";
+      }
+    }
     for (const [scope, request] of this.requests) {
       if (
         request.association?.sessionId !== association.sessionId ||

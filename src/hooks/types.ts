@@ -93,10 +93,6 @@ export interface PluginHookBeforeAgentFinalizeResult {
   };
 }
 
-export interface PluginHookMessageSendingEvent {
-  readonly content: string;
-}
-
 export interface PluginHookSessionContext {
   readonly agentId?: string;
   readonly sessionId: string;

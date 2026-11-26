@@ -218,72 +218,115 @@ describe("createHookHandlers tracking guards", () => {
     emitHostAgentEvent.mockReset();
   });
 
-  it("logs message finalization without raw session or association identifiers", async () => {
-    const sessionId = "private-session/customer";
-    const sessionKey = "agent:private:direct:customer";
-    const runId = "private-run/customer";
-    const turnKey = "private-turn/customer";
-    const turnAssociations = seedAssociation(
-      sessionId,
-      turnKey,
-      runId,
-      sessionKey,
-    );
-    const finalizeTurnFromAgentEnd = vi
-      .fn()
-      .mockResolvedValue("retryable-failure");
-    const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
-    const handlers = createHandlers(
-      {},
-      { turnAssociations, tracker: { finalizeTurnFromAgentEnd } },
-    );
-
-    await handlers.onMessageSending(
-      { content: "done" } as never,
-      { sessionId, sessionKey, runId } as never,
-    );
-
-    expect(
-      parseLogReceipt(
-        info.mock.calls.find(([message]) =>
-          message.startsWith("onMessageSending hook triggered "),
-        ),
-      ),
-    ).toEqual([
-      "onMessageSending hook triggered",
-      {
-        hasSessionId: true,
-        hasSessionKey: true,
-        hasRunId: true,
-      },
-    ]);
-    expect(
-      parseLogReceipt(
-        info.mock.calls.find(([message]) =>
-          message.startsWith("onMessageSending association resolved "),
-        ),
-      ),
-    ).toEqual([
-      "onMessageSending association resolved",
-      {
-        associationResolved: true,
-      },
-    ]);
-    expect(
-      parseLogReceipt(
-        info.mock.calls.find(([message]) =>
-          message.startsWith("onMessageSending turn finalization result "),
-        ),
-      ),
-    ).toEqual([
-      "onMessageSending turn finalization result",
-      { finalizationStatus: "retryable-failure" },
-    ]);
-    const receipts = JSON.stringify(info.mock.calls);
-    for (const privateValue of [sessionId, sessionKey, runId, turnKey]) {
-      expect(receipts).not.toContain(privateValue);
+  it("evicts the oldest completed tool IDs and frees the rest on session end", async () => {
+    const sessionId = "recorded-tools";
+    const turnKey = "recorded-tools-turn";
+    const turnAssociations = seedAssociation(sessionId, turnKey);
+    const { merge } = mockExactTurnMerge();
+    const handlers = createHandlers({}, { turnAssociations });
+    const trackerCleanup = vi
+      .spyOn(defaultTracker, "cleanup")
+      .mockImplementation(() => {});
+    vi.spyOn(defaultTracker, "cleanupExpired").mockReturnValue(0);
+    const ctx = { sessionId };
+    const tool = (id: number) => ({
+      toolCallId: `tool-${id}`,
+      toolName: "exec",
+      params: {},
+      result: "ok",
+    });
+    for (let id = 0; id <= 4096; id++) {
+      await handlers.onAfterToolCall(tool(id), ctx);
     }
+    expect(merge).toHaveBeenCalledTimes(4097);
+    await handlers.onAfterToolCall(tool(4096), ctx);
+    expect(merge).toHaveBeenCalledTimes(4097);
+    await handlers.onAfterToolCall(tool(0), ctx);
+    expect(merge).toHaveBeenCalledTimes(4098);
+    await handlers.onSessionEnd({ sessionId, messageCount: 0 }, ctx);
+    expect(trackerCleanup).toHaveBeenCalledWith(sessionId, {
+      deleteFile: false,
+    });
+    await handlers.onAfterToolCall(tool(4095), ctx);
+    expect(merge).toHaveBeenCalledTimes(4098);
+    // Recreate the handler's session association while keeping its deduplication cache.
+    bindAssociation(turnAssociations, { sessionId, turnKey });
+    await handlers.onAfterToolCall(tool(4095), ctx);
+    expect(merge).toHaveBeenCalledTimes(4099);
+    await handlers.disposePromptWork();
   });
+
+  it.each([
+    { role: "toolResult", content: "tool output" },
+    { role: "assistant", content: [{ type: "toolCall", name: "exec" }] },
+  ])(
+    "keeps an anonymous turn through a tool loop, then attributes a genuine repeat",
+    async (toolStep) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "anonymous-replay-"));
+      const tracker = SessionTracker.create(root);
+      const turnAssociations = new TurnAssociationRegistry();
+      const handlers = createHandlers(
+        {
+          config: {},
+          runtime: {
+            state: { resolveStateDir: () => root },
+            agent: { resolveAgentWorkspaceDir: () => root },
+          },
+        },
+        {
+          config: () =>
+            resolveConfig({ routing: { skills: { maxInjectedSkills: 0 } } }),
+          tracker,
+          statsAggregator: StatsAggregator.create(root),
+          turnAssociations,
+        },
+      );
+      const ctx = {
+        agentId: "main",
+        sessionId: "anon",
+        sessionKey: "agent:main:main",
+        messageProvider: "webchat",
+        trigger: "user",
+      };
+      const user = { role: "user", content: "repeat" };
+      const prompt = (messages: unknown[]) =>
+        handlers.onBeforePromptBuild({ prompt: user.content, messages }, ctx);
+      try {
+        await prompt([user]);
+        const first = tracker.getCurrentState(ctx.sessionId)!;
+        await prompt([
+          user,
+          { role: "assistant", content: "Checking." },
+          toolStep,
+          { role: "system", content: "metadata" },
+        ]);
+        expect(tracker.getCurrentState(ctx.sessionId)).toEqual(first);
+        expect(
+          turnAssociations.resolveAnonymousSession(ctx.sessionId)?.turnKey,
+        ).toBe(first.turnKey);
+        await prompt([user, { role: "assistant", content: "Done." }, user]);
+        const second = tracker.getCurrentState(ctx.sessionId)!;
+        expect(second.turnKey).not.toBe(first.turnKey);
+        expect(
+          turnAssociations.resolveAnonymousSession(ctx.sessionId)?.turnKey,
+        ).toBe(second.turnKey);
+        expect(turnAssociations.resolveSession(ctx.sessionKey)?.turnKey).toBe(
+          second.turnKey,
+        );
+        await handlers.onAgentEnd({ messages: [], success: true }, ctx);
+        expect(
+          tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+        ).toBeTruthy();
+        expect(
+          tracker.getTurnState(ctx.sessionId, first.turnKey!)?.timestamps?.end,
+        ).toBeUndefined();
+      } finally {
+        await handlers.disposePromptWork();
+        await handlers.reviewScheduler.dispose();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("does not record tool calls without a session id", async () => {
     const resolveCurrentSessionId = vi.spyOn(
@@ -1619,7 +1662,6 @@ description: Navigate Tokyo.
             ctx,
           );
         await handlers.onAgentEnd({ messages: [], success: true }, ctx);
-        await handlers.onMessageSending({ content: "done" }, ctx);
 
         expect(search).not.toHaveBeenCalled();
         expect(routingSelector).not.toHaveBeenCalled();
@@ -1655,26 +1697,39 @@ description: Navigate Tokyo.
     { newerOwner: false, sparse: true },
     { newerOwner: true, sparse: false },
     { newerOwner: true, sparse: true },
+    { newerOwner: false, sparse: true, provider: "discord" },
+    { newerOwner: true, sparse: true, provider: "discord" },
+    {
+      newerOwner: false,
+      sparse: true,
+      provider: "webchat",
+      allowedChatIds: ["webchat:direct:123"],
+    },
   ])(
-    "deduplicates completed native admissions and resumes pending ones after hook reload (newer owner: $newerOwner, sparse: $sparse)",
-    async ({ newerOwner, sparse }) => {
+    "deduplicates completed native admissions and resumes pending ones after hook reload (newer owner: $newerOwner, sparse: $sparse, provider: $provider)",
+    async ({ newerOwner, sparse, provider = "webchat", allowedChatIds }) => {
       const root = fs.mkdtempSync(
         path.join(os.tmpdir(), "native-review-reload-"),
       );
       const reviewScheduler = createMockReviewScheduler();
       const config = resolveConfig({
+        routing: { scope: { allowedChatIds } },
         review: { enabled: true, model: "fixture/review" },
       });
       const ctx = {
         agentId: "main",
         sessionId: "reloaded-session",
-        sessionKey: "agent:main:main",
+        sessionKey:
+          provider === "discord"
+            ? "agent:main:discord:direct:123"
+            : "agent:main:direct:123",
         trigger: "user" as const,
-        messageProvider: "webchat",
+        messageProvider: provider,
       };
       const lookup = vi.fn().mockResolvedValue(undefined);
       function generation() {
         const tracker = SessionTracker.create(root);
+        const turnAssociations = new TurnAssociationRegistry();
         const handlers = createHandlers(
           {
             config: {},
@@ -1692,10 +1747,12 @@ description: Navigate Tokyo.
             tracker,
             statsAggregator: StatsAggregator.create(root),
             reviewScheduler,
+            turnAssociations,
           },
         );
         return {
           tracker,
+          turnAssociations,
           dispose: () => handlers.disposePromptWork(),
           prompt: (
             id: string,
@@ -1749,7 +1806,20 @@ description: Navigate Tokyo.
         expect(reviewScheduler.schedule).not.toHaveBeenCalled();
 
         await reload();
-        await f.prompt("message-9", "run-9");
+        const warn = vi.spyOn(logger, "warn");
+        await Promise.all([
+          f.prompt("message-9", "run-9"),
+          f.prompt("message-9", "run-9-rebuild"),
+        ]);
+        expect(
+          warn.mock.calls.some(([message]) =>
+            message.startsWith("before_prompt_build hook error"),
+          ),
+        ).toBe(false);
+        for (const alias of ["run-9", "run-9-rebuild"]) {
+          expect(f.turnAssociations.hasRun(alias)).toBe(true);
+          expect(f.turnAssociations.resolve(alias)).toBeUndefined();
+        }
         await f.load("run-9");
         await f.end("run-9");
         expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(ninth);
@@ -1770,6 +1840,10 @@ description: Navigate Tokyo.
         );
         await f.load("run-10");
         await f.end("run-10");
+        await f.prompt("message-10", "run-10-rebuild", "");
+        expect(f.turnAssociations.hasRun("run-10-rebuild")).toBe(true);
+        expect(f.turnAssociations.resolve("run-10-rebuild")).toBeUndefined();
+        await f.load("run-10-rebuild");
         await f.end("run-10");
         expect(
           f.tracker.getTurnState(ctx.sessionId, pending.turnKey!)
@@ -1797,13 +1871,7 @@ description: Navigate Tokyo.
       eventId: "session-1:2026-06-11T00:00:00.000Z",
       turnNumber: 10,
       current: {
-        confidence: 0.2,
         input: "不對，應該是別的做法",
-        intent: {
-          intent: "other",
-          reason: "test",
-          confidence: 0.2,
-        },
         toolCalls: Array.from({ length: 5 }, () => ({
           name: "exec",
         })),
@@ -1813,7 +1881,6 @@ description: Navigate Tokyo.
     };
     const state = {
       input: snapshot.current.input,
-      intent: { result: snapshot.current.intent },
       toolCalls: snapshot.current.toolCalls?.map((call) => ({
         ...call,
         params: {},
@@ -1840,7 +1907,6 @@ description: Navigate Tokyo.
     const reviewer = vi.fn().mockResolvedValue({
       findings: [],
       outcome: "nofinding" as const,
-      noFindingReasonCounts: { "wrong-trigger": 1 },
     });
     const reviewLogWriter = {
       inspectionOffsetsForEvent: () => () => 0,
@@ -1914,20 +1980,13 @@ description: Navigate Tokyo.
       turnNumber: 10,
       current: {
         input: "不對，應該是別的做法",
-        intent: {
-          intent: "other",
-          reason: "test",
-          confidence: 0.2,
-        },
         toolCalls: Array.from({ length: 5 }, () => ({ name: "exec" })),
         timestamps: { start: "2026-06-11T00:00:00.000Z" },
       },
       recent: [],
-      intentCatalog: [],
     };
     const state = {
       input: snapshot.current.input,
-      intent: { result: snapshot.current.intent },
       toolCalls: snapshot.current.toolCalls.map((call) => ({
         ...call,
         params: {},

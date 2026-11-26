@@ -242,9 +242,24 @@ export class TurnAssociationRegistry {
       this.entries.delete(key);
       return "bound";
     }
+    const now = this.now();
+    if (!association.finalized) {
+      for (const [candidateKey, candidate] of this.entries) {
+        if (
+          candidateKey.startsWith("anonymous:") &&
+          !candidate.nativeFence &&
+          candidate.state === "active" &&
+          candidate.association?.sessionId === association.sessionId &&
+          candidate.association.turnKey !== association.turnKey
+        ) {
+          candidate.state = "terminal";
+          candidate.touchedAt = now;
+        }
+      }
+    }
     entry.state = "active";
     entry.association = { ...association };
-    entry.touchedAt = this.now();
+    entry.touchedAt = now;
     delete entry.token;
     return "bound";
   }

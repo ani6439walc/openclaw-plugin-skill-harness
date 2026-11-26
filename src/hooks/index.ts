@@ -21,11 +21,11 @@ import { IntentReviewLogWriter } from "../review/log-writer.js";
 import { isRelationReviewDue } from "../review/triggers.js";
 import type { getReviewModelRef } from "../review/subagent.js";
 import type { ReviewSnapshot } from "../review/types.js";
-import { createIntentReviewScheduler } from "../review/scheduler.js";
+import {
+  createIntentReviewScheduler,
+  resolveReviewSessionKey,
+} from "../review/scheduler.js";
 import { createBackgroundRunner } from "../subagent-runtime.js";
-import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import {
   extractLatestUserMessage,
   limitConversationTurns,
@@ -60,7 +60,7 @@ import type {
   RelationReviewContext,
   RelationPreparationSummary,
 } from "../review/relations.js";
-import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
+import type { AvailableSkill } from "../skills/types.js";
 import { matchAvailableSkillNamesWithTokens } from "../skills/name-index.js";
 import {
   buildCandidateSkillsUnionPool,
@@ -83,7 +83,6 @@ import type {
   PluginHookBeforePromptBuildEvent,
   PluginHookBeforePromptBuildResult,
   PluginHookBeforeToolCallEvent,
-  PluginHookMessageSendingEvent,
   PluginHookSessionContext,
   PluginHookSessionEndEvent,
   PluginHookToolContext,
@@ -236,7 +235,6 @@ export function createHookHandlers(deps: HookDeps) {
           };
         }
       : runJevUnifiedRouting);
-  const clock = deps.clock ?? (() => new Date());
   const qmdSkillIndex = deps.qmdSkillIndex;
 
   const reviewLogWriter: NonNullable<HookDeps["reviewLogWriter"]> =
@@ -247,7 +245,15 @@ export function createHookHandlers(deps: HookDeps) {
   const sharedRoots = () => deps.getSharedRoots?.() ?? [];
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const toolFallbacks = deps.toolFallbacks ?? new ToolFallbackRegistry();
-  const recordedToolCalls = new Set<string>();
+  const recordedToolCalls = new Map<string, string>();
+  const maxRecordedToolCalls = 4096;
+  function rememberToolCall(key: string, sessionId: string): void {
+    recordedToolCalls.set(key, sessionId);
+    if (recordedToolCalls.size > maxRecordedToolCalls) {
+      const oldest = recordedToolCalls.keys().next().value;
+      if (oldest !== undefined) recordedToolCalls.delete(oldest);
+    }
+  }
   const promptExecutions = new PromptExecutions<string | undefined>(
     api.lifecycle?.signal,
   );
@@ -261,8 +267,11 @@ export function createHookHandlers(deps: HookDeps) {
       signal: api.lifecycle?.signal,
       runInBackgroundContext: createBackgroundRunner(api.lifecycle),
       isSystemActive: (candidate) => {
-        const sessionKey = candidate.sessionKey ?? candidate.ctx.sessionKey;
-        return turnAssociations.resolveSession(sessionKey) !== undefined;
+        return (
+          turnAssociations.resolveSession(
+            resolveReviewSessionKey(candidate),
+          ) !== undefined
+        );
       },
     });
 
@@ -347,7 +356,7 @@ export function createHookHandlers(deps: HookDeps) {
       config: candidate.resolvedConfig,
       agentId: candidate.agentId,
       relationContext,
-      sessionKey: candidate.ctx.sessionKey ?? candidate.snapshot.sessionKey,
+      sessionKey: resolveReviewSessionKey(candidate),
       messageProvider: candidate.ctx.messageProvider,
       modelRef: candidate.modelRef,
       snapshot: candidate.snapshot,
@@ -414,6 +423,21 @@ export function createHookHandlers(deps: HookDeps) {
           : await promptExecutions.track(lookup());
       }
     }
+    if (
+      !resolvedSessionKey &&
+      resolvedAgentId &&
+      ctx.sessionId &&
+      request?.admissionId !== undefined
+    ) {
+      resolvedSessionKey =
+        tracker
+          .getNativeTurnIdentity?.(
+            ctx.sessionId,
+            resolvedAgentId,
+            request.admissionId,
+          )
+          ?.sessionKey?.trim() || undefined;
+    }
     return { effectiveAgentId: resolvedAgentId, resolvedSessionKey, request };
   }
 
@@ -438,8 +462,8 @@ export function createHookHandlers(deps: HookDeps) {
         params.routing.resolvedSessionKey ||
         params.ctx.sessionKey?.trim() ||
         undefined;
-      const assertActive = () => {
-        promptExecutions.assertRequestCurrent(request);
+      const assertActive = (allowFinalized = false) => {
+        promptExecutions.assertRequestCurrent(request, allowFinalized);
         params.ctx.hookInvocation?.assertActive();
       };
       const association = await promptExecutions.prepareRequest(
@@ -457,7 +481,9 @@ export function createHookHandlers(deps: HookDeps) {
             recentTurns: params.recentTurns,
             assertActive,
           });
-          assertActive();
+          assertActive(
+            "identity" in prepared && prepared.identity.finalized === true,
+          );
           if (!("identity" in prepared)) return;
           return {
             sessionId,
@@ -469,7 +495,7 @@ export function createHookHandlers(deps: HookDeps) {
           };
         },
       );
-      assertActive();
+      assertActive(association?.finalized === true);
       if (!association) return;
       if (runId) {
         // An ambiguous run alias must not conflate independent admissions.
@@ -567,10 +593,15 @@ export function createHookHandlers(deps: HookDeps) {
         }
         return;
       }
-      const association = {
+      const association: TurnAssociation = {
         sessionId,
-        sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+        sessionKey:
+          prepared.identity.sessionKey ||
+          params.routing.resolvedSessionKey ||
+          params.ctx.sessionKey?.trim() ||
+          undefined,
         turnKey: prepared.identity.turnKey,
+        ...(prepared.identity.finalized ? { finalized: true as const } : {}),
       };
       const bound =
         reservation.status === "reserved"
@@ -578,7 +609,14 @@ export function createHookHandlers(deps: HookDeps) {
             ? turnAssociations.bind(reservation.token, runId, association)
             : turnAssociations.bindAnonymous(reservation.token, association)
           : turnAssociations.bindExisting(runId, association);
-      return bound === "bound" ? association : undefined;
+      if (bound !== "bound") return;
+      if (association.finalized) {
+        promptExecutions.finalizeAssociation(association);
+        turnAssociations.markAssociationTerminal(association);
+        toolFallbacks.markAssociationTerminal(association);
+        return;
+      }
+      return association;
     } catch (error) {
       if (reservation.status === "reserved") {
         turnAssociations.release(reservation.token);
@@ -597,7 +635,8 @@ export function createHookHandlers(deps: HookDeps) {
     const contextRunId = params.contextRunId?.trim();
     if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
     const runId = eventRunId || contextRunId;
-    const sessionIdentity = params.sessionId ?? params.sessionKey;
+    const sessionKey = params.sessionKey?.trim();
+    const sessionIdentity = params.sessionId ?? sessionKey;
     const association = runId
       ? turnAssociations.hasRun(runId)
         ? turnAssociations.resolve(runId)
@@ -610,9 +649,9 @@ export function createHookHandlers(deps: HookDeps) {
       (params.sessionId &&
         association.sessionId !== params.sessionId &&
         association.sessionKey !== params.sessionId) ||
-      (params.sessionKey &&
-        association.sessionKey !== params.sessionKey &&
-        association.sessionId !== params.sessionKey)
+      (sessionKey &&
+        association.sessionKey !== sessionKey &&
+        association.sessionId !== sessionKey)
     ) {
       return;
     }
@@ -747,20 +786,16 @@ export function createHookHandlers(deps: HookDeps) {
     let nameCandidates: SkillDiscoveryCandidate[] = [];
     let matchedTokens: string[] = [];
     let fallbackReason: SkillCandidatePoolFallbackReason | undefined;
-    let nameMatchStatus: "completed" | "disabled" | "error" =
-      policy.maxInjectedSkills === 0 ? "disabled" : "completed";
+    let nameMatchStatus: "completed" | "error" = "completed";
     let nameMatchError: string | undefined;
     const nameMatchStartedAtMs = Date.now();
 
     try {
-      const nameMatchResult =
-        policy.maxInjectedSkills === 0
-          ? { candidates: [], matchedTokens: [] }
-          : matchAvailableSkillNamesWithTokens({
-              skills: visibleSkills,
-              input: params.latestUserMessage,
-              options: policy.nameMatch,
-            });
+      const nameMatchResult = matchAvailableSkillNamesWithTokens({
+        skills: visibleSkills,
+        input: params.latestUserMessage,
+        options: policy.nameMatch,
+      });
       nameCandidates = nameMatchResult.candidates.map((candidate) => ({
         ...candidate,
         collections: ["meta" as const],
@@ -808,16 +843,14 @@ export function createHookHandlers(deps: HookDeps) {
 
     const searchSkills = async () => {
       const searchStartedAtMs = Date.now();
-      let status:
-        "completed" | "disabled" | "unavailable" | "timeout" | "error" =
-        policy.maxInjectedSkills === 0 ? "disabled" : "unavailable";
+      let status: "completed" | "unavailable" | "timeout" | "error" =
+        "unavailable";
       let searchError: string | undefined;
       let searchReason: string | undefined;
       let searchConfidence: number | undefined;
       let hits: { id: string; semanticScore: number | null }[] = [];
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        if (policy.maxInjectedSkills === 0) return;
         if (!qmdSkillIndex) {
           fallbackReason = "retrieval-unavailable";
           searchError = "qmd skill index unavailable";
@@ -1177,30 +1210,49 @@ export function createHookHandlers(deps: HookDeps) {
           ownerSessionId,
         );
       }
-      if (request?.retainedReplay) {
-        const old = request.retainedReplay;
+      const nativeRequest =
+        request?.admissionId !== undefined ? request : undefined;
+      const replay =
+        nativeRequest?.retainedReplay ??
+        (nativeRequest?.state !== "current"
+          ? nativeRequest?.association
+          : undefined);
+      const bindNativeReplay = (
+        owner: PromptRequestOwner<string | undefined>,
+        replay: TurnAssociation,
+      ) => {
         if (runId) {
-          const sessionKey = old.sessionKey ?? ctx.sessionKey?.trim();
-          turnAssociations.bindNativeRun(runId, request, {
-            ...old,
+          const sessionKey =
+            replay.sessionKey?.trim() || ctx.sessionKey?.trim() || undefined;
+          turnAssociations.bindNativeRun(runId, owner, {
+            ...replay,
             sessionKey,
           });
         }
-        if (old.finalized) turnAssociations.markAssociationTerminal(old);
-        return;
+        if (replay.finalized) turnAssociations.markAssociationTerminal(replay);
+      };
+      if (nativeRequest && replay) {
+        bindNativeReplay(nativeRequest, replay);
+        if (nativeRequest.retainedReplay) return;
       }
       const assertRequestActive = (allowFinalized = false) => {
         ctx.hookInvocation?.assertActive();
         promptExecutions.assertActive();
-        if (request)
+        if (request && !replay)
           promptExecutions.assertRequestCurrent(request, allowFinalized);
       };
       assertRequestActive(true);
-      const routing = await resolvePromptBuildIdentity(
-        ctx,
-        request,
-        admissionId !== undefined,
-      );
+      const routing: PromptBuildIdentity = replay
+        ? {
+            effectiveAgentId: resolveStatusUpdateAgentId(ctx),
+            resolvedSessionKey:
+              replay.sessionKey?.trim() || ctx.sessionKey?.trim() || undefined,
+          }
+        : await resolvePromptBuildIdentity(
+            ctx,
+            request,
+            admissionId !== undefined,
+          );
       assertRequestActive(true);
       if (request) request.resolvedSessionKey = routing.resolvedSessionKey;
       resolvedSessionKey = routing.resolvedSessionKey ?? resolvedSessionKey;
@@ -1227,9 +1279,12 @@ export function createHookHandlers(deps: HookDeps) {
       assertRequestActive(true);
       if (
         admissionId !== undefined &&
-        (!request || request.state === "finalized")
-      )
+        (!request || replay || request.state === "finalized")
+      ) {
+        if (!replay && nativeRequest?.association)
+          bindNativeReplay(nativeRequest, nativeRequest.association);
         return toPromptBuildResult(undefined, workingSetSkillsXml);
+      }
       intentContextEnabled = isEnabledForAgent(
         refreshedConfig,
         routing.effectiveAgentId,
@@ -1262,7 +1317,10 @@ export function createHookHandlers(deps: HookDeps) {
         ctx,
         routing,
         latestUserMessage,
-        recentTurns: extractRecentTurns(event.messages),
+        recentTurns:
+          admissionId === undefined
+            ? extractRecentTurns(event.messages, { finalRepliesOnly: true })
+            : undefined,
       });
       assertRequestActive(true);
       if (!routing.association) {
@@ -1339,9 +1397,7 @@ export function createHookHandlers(deps: HookDeps) {
               });
 
               const relationGraph =
-                refreshedConfig.routing.skills.maxInjectedSkills > 0 &&
-                unionPool.candidateSkills.length > 0 &&
-                deps.dataRoot
+                unionPool.candidateSkills.length > 0 && deps.dataRoot
                   ? await resolveRelationGraph(
                       deps.dataRoot,
                       skillDiscoveryResult.visibleSkills,
@@ -1359,7 +1415,7 @@ export function createHookHandlers(deps: HookDeps) {
                 expanded: related.candidateSkills,
                 expandedNames: related.added,
                 visibleSkills: skillDiscoveryResult.visibleSkills,
-                enabled: refreshedConfig.routing.skills.maxInjectedSkills > 0,
+                enabled: true,
               });
               const relationEvidence = collectRelationEvidence(
                 superset.candidateSkills,
@@ -1383,9 +1439,7 @@ export function createHookHandlers(deps: HookDeps) {
                 ]),
               );
 
-              if (superset.candidateSkills.length === 0) {
-                matchedSkills = [];
-              } else {
+              if (superset.candidateSkills.length > 0) {
                 try {
                   const llmResult = await withPromptDeadline(
                     refreshedConfig.routing.timeoutMs,
@@ -1441,7 +1495,6 @@ export function createHookHandlers(deps: HookDeps) {
                   } else {
                     rerankStatus = "unavailable";
                     rerankError = "Routing selection unavailable";
-                    matchedSkills = [];
                   }
                 } catch (error) {
                   rerankStatus = "error";
@@ -1451,7 +1504,6 @@ export function createHookHandlers(deps: HookDeps) {
                       reason: "selection-failed",
                     })}`,
                   );
-                  matchedSkills = [];
                 }
               }
 
@@ -1531,9 +1583,7 @@ export function createHookHandlers(deps: HookDeps) {
 
               const inputSkillDiscovery: InputSkillDiscovery = {
                 nameCandidates: skillDiscoveryResult.nameCandidates.length,
-                retrievalAttempted:
-                  Boolean(qmdSkillIndex) &&
-                  refreshedConfig.routing.skills.maxInjectedSkills > 0,
+                retrievalAttempted: Boolean(qmdSkillIndex),
                 retrievalCandidates:
                   skillDiscoveryResult.retrievalCandidates.length,
                 retrievalSemanticScores:
@@ -1555,14 +1605,23 @@ export function createHookHandlers(deps: HookDeps) {
                 ),
               };
 
-              await recordPromptBuildSession({
-                assertActive,
-                association: routing.association,
-                latestUserMessage,
-                matchedSkills,
-                inputSkillDiscovery,
-                confidence,
-              });
+              const preservePersistedSelection =
+                request?.admissionId !== undefined &&
+                rerankStatus !== "completed" &&
+                Boolean(
+                  tracker.getCurrentState(association.sessionId)?.matchedSkills
+                    ?.length,
+                );
+              if (!preservePersistedSelection) {
+                await recordPromptBuildSession({
+                  assertActive,
+                  association,
+                  latestUserMessage,
+                  matchedSkills,
+                  inputSkillDiscovery,
+                  confidence,
+                });
+              }
               assertActive();
 
               emitPipelineEvent(
@@ -1686,7 +1745,7 @@ export function createHookHandlers(deps: HookDeps) {
       },
     });
     if (toolCallKey && merged === "applied") {
-      recordedToolCalls.add(toolCallKey);
+      rememberToolCall(toolCallKey, association.sessionId);
       pendingToolCalls.delete(toolCallKey);
       toolFallbacks.delete(toolCallKey);
     }
@@ -1845,7 +1904,10 @@ export function createHookHandlers(deps: HookDeps) {
     try {
       return reviewScheduler.schedule({
         agentId: params.agentId,
-        sessionKey: params.ctx.sessionKey ?? params.snapshot.sessionKey,
+        sessionKey:
+          params.ctx.sessionKey?.trim() ||
+          params.snapshot.sessionKey?.trim() ||
+          undefined,
         ctx: params.ctx,
         resolvedConfig: params.resolvedConfig,
         modelRef: params.modelRef,
@@ -2001,7 +2063,7 @@ export function createHookHandlers(deps: HookDeps) {
             for (const [toolCallId] of stagedEntries) {
               toolFallbacks.delete(toolCallId);
               pendingToolCalls.delete(toolCallId);
-              recordedToolCalls.add(toolCallId);
+              rememberToolCall(toolCallId, association.sessionId);
             }
           }
         }
@@ -2010,7 +2072,7 @@ export function createHookHandlers(deps: HookDeps) {
       for (const [toolCallId] of stagedEntries) {
         toolFallbacks.delete(toolCallId);
         pendingToolCalls.delete(toolCallId);
-        recordedToolCalls.add(toolCallId);
+        rememberToolCall(toolCallId, association.sessionId);
       }
       await finalizeTrackedTurn(association, ctx, observePhase);
     } catch (error) {
@@ -2055,77 +2117,10 @@ export function createHookHandlers(deps: HookDeps) {
       if (merged === "applied") {
         toolFallbacks.delete(toolCallId);
         pendingToolCalls.delete(toolCallId);
-        recordedToolCalls.add(toolCallId);
+        rememberToolCall(toolCallId, association.sessionId);
       }
     }
     return;
-  }
-
-  async function onMessageSending(
-    event: PluginHookMessageSendingEvent,
-    ctx: PluginHookAgentContext,
-  ): Promise<void> {
-    logger.info(
-      `onMessageSending hook triggered ${JSON.stringify({
-        hasSessionId: Boolean(ctx.sessionId),
-        hasSessionKey: Boolean(ctx.sessionKey),
-        hasRunId: Boolean(ctx.runId),
-      })}`,
-    );
-    const association = resolveAssociatedTurn({
-      contextRunId: ctx.runId,
-      sessionId: ctx.sessionId,
-      sessionKey: ctx.sessionKey,
-    });
-    logger.info(
-      `onMessageSending association resolved ${JSON.stringify({
-        associationResolved: Boolean(association),
-      })}`,
-    );
-    if (!association) return;
-    const stagedEntries = toolFallbacks.listForAssociation(association);
-    const stagedToolFallbacks = stagedEntries.map(
-      ([, { fallback, skillUsed }]) =>
-        skillUsed ? { ...fallback, skillUsed } : fallback,
-    );
-    const messageContent = (event as { content?: unknown })?.content;
-    const resultText =
-      typeof messageContent === "string"
-        ? messageContent.trim()
-        : event !== undefined
-          ? resolveToolResultText(event)
-          : undefined;
-    const finalized = await tracker.finalizeTurnFromAgentEnd({
-      sessionId: association.sessionId,
-      expectedTurnKey: association.turnKey,
-      stagedToolFallbacks,
-      result: resultText || undefined,
-      endedAt: new Date().toISOString(),
-    });
-    logger.info(
-      `onMessageSending turn finalization result ${JSON.stringify({
-        finalizationStatus: finalized,
-      })}`,
-    );
-    if (
-      finalized === "applied" ||
-      finalized === "already-finalized" ||
-      finalized === "became-review-eligible"
-    ) {
-      promptExecutions.finalizeAssociation(association);
-      turnAssociations.markAssociationTerminal(association);
-      toolFallbacks.markAssociationTerminal(association);
-      for (const [toolCallId] of stagedEntries) {
-        toolFallbacks.delete(toolCallId);
-        pendingToolCalls.delete(toolCallId);
-        recordedToolCalls.add(toolCallId);
-      }
-      if (finalized !== "already-finalized") {
-        await finalizeTrackedTurn(association, ctx);
-      } else {
-        await recordAgentEndStats(association);
-      }
-    }
   }
 
   async function onSessionEnd(
@@ -2138,8 +2133,10 @@ export function createHookHandlers(deps: HookDeps) {
     for (const [toolCallId, pending] of pendingToolCalls) {
       if (pending.association.sessionId === ctx.sessionId) {
         pendingToolCalls.delete(toolCallId);
-        recordedToolCalls.delete(toolCallId);
       }
+    }
+    for (const [toolCallId, sessionId] of recordedToolCalls) {
+      if (sessionId === ctx.sessionId) recordedToolCalls.delete(toolCallId);
     }
     tracker.cleanup(ctx.sessionId, {
       deleteFile: false,
@@ -2154,7 +2151,6 @@ export function createHookHandlers(deps: HookDeps) {
     onAfterToolCall,
     onToolResultPersist,
     onBeforeAgentFinalize,
-    onMessageSending,
     onAgentEnd,
     onSessionEnd,
     reviewScheduler,

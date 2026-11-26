@@ -102,6 +102,26 @@ export function sanitizePromptInput(text: string): string {
 
 export const sanitizeHistoricalIntentInput = sanitizePromptInput;
 
+function isToolStep({
+  role,
+  content,
+}: {
+  role?: unknown;
+  content?: unknown;
+}): boolean {
+  return (
+    role === "toolResult" ||
+    (role === "assistant" &&
+      Array.isArray(content) &&
+      content.some(
+        (part) =>
+          isConversationMessage(part) &&
+          "type" in part &&
+          (part.type === "toolCall" || part.type === "tool_use"),
+      ))
+  );
+}
+
 function isHeartbeatMessage(role: string, text: string): boolean {
   const trimmed = text.trim();
   if (role === "assistant" && trimmed === "HEARTBEAT_OK") return true;
@@ -110,8 +130,22 @@ function isHeartbeatMessage(role: string, text: string): boolean {
 
 export function extractRecentTurns(
   messages: unknown[] | undefined,
+  options?: { finalRepliesOnly?: boolean },
 ): RecentTurn[] {
   if (!Array.isArray(messages)) return [];
+  if (options?.finalRepliesOnly) {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (
+        !isConversationMessage(message) ||
+        typeof message.role !== "string" ||
+        message.role === "system"
+      )
+        continue;
+      if (isToolStep(message)) return [];
+      break;
+    }
+  }
 
   const turns: RecentTurn[] = [];
   let pendingUser: RecentTurn | undefined;
@@ -121,6 +155,7 @@ export function extractRecentTurns(
     if (!isConversationMessage(message)) continue;
     const role = message.role;
     if (role !== "user" && role !== "assistant") continue;
+    if (options?.finalRepliesOnly && isToolStep(message)) continue;
 
     const rawText = extractTextContent(message.content);
     const text =

@@ -18,6 +18,17 @@ export interface ReviewCandidate {
   snapshot: ReviewSnapshot;
 }
 
+export function resolveReviewSessionKey(
+  candidate: ReviewCandidate,
+): string | undefined {
+  return (
+    candidate.sessionKey?.trim() ||
+    candidate.ctx.sessionKey?.trim() ||
+    candidate.snapshot.sessionKey?.trim() ||
+    undefined
+  );
+}
+
 export type ReviewRunner = (
   candidate: ReviewCandidate,
   abortSignal: AbortSignal,
@@ -104,11 +115,7 @@ export class IntentReviewScheduler {
       return false;
     }
 
-    const sessionKey =
-      candidate.sessionKey ??
-      candidate.ctx.sessionKey ??
-      candidate.snapshot.sessionKey ??
-      "";
+    const sessionKey = resolveReviewSessionKey(candidate) ?? "";
     const key = JSON.stringify([candidate.agentId, sessionKey]);
 
     const existing = this.pendingBySession.get(key);

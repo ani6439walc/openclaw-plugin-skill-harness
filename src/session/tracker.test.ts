@@ -1,4 +1,5 @@
 import { StatsAggregator } from "../stats/aggregator.js";
+import { createHash } from "node:crypto";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   resolveTurnEventId,
@@ -89,6 +90,88 @@ describe("SessionTracker", () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-state-test-"));
     tracker = SessionTracker.create(tempDir);
     fixtureTurnSequence = 0;
+  });
+
+  it("reads an uncached native identity from disk without publishing or rewriting it", () => {
+    const sessionId = "native-on-disk";
+    const admissionId = "native-id";
+    const nativeAdmissionDigest = createHash("sha256")
+      .update(JSON.stringify(["main", sessionId, admissionId]))
+      .digest("hex");
+    const file = sessionsPath(`${sessionId}.json`, tempDir);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const data = JSON.stringify({
+      sessionId,
+      sessionKey: " agent:main:direct:123 ",
+      current: { turnKey: "known", nativeAdmissionDigest },
+    });
+    fs.writeFileSync(file, data);
+    expect(tracker.getCurrentState(sessionId)).toBeUndefined();
+    expect(
+      tracker.getNativeTurnIdentity(sessionId, "main", admissionId),
+    ).toEqual({
+      turnKey: "known",
+      sessionKey: "agent:main:direct:123",
+      reused: true,
+    });
+    expect(tracker.getCurrentState(sessionId)).toBeUndefined();
+    expect(fs.readFileSync(file, "utf8")).toBe(data);
+  });
+
+  it("loads pre-retirement sessions without carrying experience evidence into Review or its cadence", () => {
+    const root = path.join(tempDir, "old-root");
+    const sessionId = "old-session";
+    const file = sessionsPath(`${sessionId}.json`, root);
+    const timestamps = {
+      start: "2026-11-25T00:00:00Z",
+      end: "2026-11-25T00:00:01Z",
+    };
+    const retired = {
+      matchedExperiences: ["qmd-experience", "related-experience"],
+      inputSkillDiscovery: {
+        experienceRetrieval: { candidateCount: 2 },
+        injectedSkills: [
+          { name: "qmd-experience", source: "experience-qmd" },
+          { name: "related-experience", source: "experience-associated" },
+        ],
+      },
+    };
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        sessionId,
+        agentId: "main",
+        history: [
+          {
+            turnKey: "old",
+            input: "Experience only",
+            matchedSkills: [],
+            ...retired,
+            timestamps,
+          },
+        ],
+        current: {
+          turnKey: "new",
+          input: "Skill bearing",
+          matchedSkills: ["fixture"],
+          ...retired,
+          timestamps,
+        },
+      }),
+    );
+    const loaded = SessionTracker.create(root);
+    expect(loaded.getTurnState(sessionId, "old")).toMatchObject(retired);
+    expect(loaded.getReviewSnapshotForTurn(sessionId, "old")).toBeUndefined();
+    const snapshot = loaded.getReviewSnapshotForTurn(sessionId, "new");
+    expect(snapshot?.turnNumber).toBe(1);
+    expect(snapshot?.current.matchedSkills).toEqual(["fixture"]);
+    expect(snapshot?.recent[0].matchedSkills).toEqual([]);
+    for (const turn of [snapshot?.current, ...(snapshot?.recent ?? [])]) {
+      expect(turn).not.toHaveProperty("matchedExperiences");
+      expect(turn).not.toHaveProperty("inputSkillDiscovery");
+    }
+    expect(loaded.listRetainedSessions()[0].skillTurnCount).toBe(1);
   });
 
   afterEach(() => {
@@ -473,7 +556,11 @@ describe("SessionTracker", () => {
         }),
       ).resolves.toEqual({
         status: "reused",
-        identity: { turnKey: "run-a", reused: true },
+        identity: {
+          turnKey: "run-a",
+          reused: true,
+          sessionKey: "agent:main:direct:a",
+        },
       });
       await expect(
         tracker.preparePromptTurn({

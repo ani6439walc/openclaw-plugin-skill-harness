@@ -325,7 +325,7 @@ describe("TurnAssociationRegistry", () => {
     });
   });
 
-  it("resolves anonymous turns by session only while attribution is unique", () => {
+  it("supersedes the prior anonymous turn when a distinct turn binds", () => {
     const registry = new TurnAssociationRegistry();
     const first = registry.reserveAnonymous();
     expect(first.status).toBe("reserved");
@@ -347,7 +347,9 @@ describe("TurnAssociationRegistry", () => {
       sessionId: "session-a",
       turnKey: "turn-b",
     });
-    expect(registry.resolveSession("session-a")).toBeUndefined();
+    const current = { sessionId: "session-a", turnKey: "turn-b" };
+    expect(registry.resolveSession("session-a")).toEqual(current);
+    expect(registry.resolveAnonymousSession("session-a")).toEqual(current);
   });
 
   it("resolves a unique live turn by canonical session key", () => {

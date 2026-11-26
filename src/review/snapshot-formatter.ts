@@ -11,10 +11,6 @@ function escapeSnapshotText(value: unknown): string {
 type ReviewSnapshotBlockName =
   | "review_snapshot"
   | "snapshot_manifest"
-  | "skill_placement_candidate"
-  | "selected_placement_skill"
-  | "skill_metadata"
-  | "skill_content"
   | "current_turn"
   | "recent_turn"
   | "recent_turns"

@@ -7,9 +7,10 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../../api.js";
+import { logger } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import * as skillInventory from "../skills/index.js";
-import { defaultStatsAggregator } from "../stats/index.js";
+import { StatsAggregator } from "../stats/index.js";
 import { SessionTracker } from "../session/tracker.js";
 import { createHookHandlers } from "./index.js";
 import {
@@ -90,9 +91,10 @@ async function until(predicate: () => boolean) {
   }
   throw new Error("Fixture did not reach expected stage");
 }
-function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "prompt-budget-"));
-  roots.push(root);
+function fixture(existingRoot?: string) {
+  const root =
+    existingRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), "prompt-budget-"));
+  if (!existingRoot) roots.push(root);
   const workspace = path.join(root, "workspace");
   const skillDir = path.join(workspace, "skills", "fixture");
   fs.mkdirSync(skillDir, { recursive: true });
@@ -141,6 +143,7 @@ function fixture() {
     } as unknown as OpenClawPluginApi,
     dataRoot: root,
     tracker,
+    statsAggregator: StatsAggregator.create(root),
     turnAssociations,
     config: () => config,
     refreshLiveConfigFromRuntime: () => {},
@@ -173,6 +176,7 @@ function fixture() {
       }),
     );
   return {
+    root,
     tracker,
     search,
     selector,
@@ -266,10 +270,12 @@ describe("native admission identity", () => {
 
   it("never revives a finalized or superseded admission for a rebuild", async () => {
     const f = fixture();
-    vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(false);
     const admitted = { ...event, currentUserMessageId: "admission-a" };
     await f.handlers.onBeforePromptBuild(admitted, ctx);
-    await f.handlers.onMessageSending({ content: "done" }, ctx);
+    await f.handlers.onAgentEnd(
+      { messages: [{ role: "assistant", content: "done" }], success: true },
+      ctx,
+    );
     const prepare = vi.spyOn(f.tracker, "preparePromptTurn");
     const replay = await f.handlers.onBeforePromptBuild(admitted, {
       ...ctx,
@@ -291,6 +297,101 @@ describe("native admission identity", () => {
     expect(f.selector).toHaveBeenCalledTimes(2);
     expect(f.tracker.getCurrentState("session")?.turnKey).toBe(turnB);
   });
+
+  it("rebinds a superseded pending admission for exact completion without rerouting", async () => {
+    const f = fixture();
+    const first = { ...event, currentUserMessageId: "first" };
+    const warn = vi.spyOn(logger, "warn");
+    await f.handlers.onBeforePromptBuild(first, ctx);
+    const oldTurn = f.tracker.getCurrentState(ctx.sessionId)!.turnKey!;
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "new" },
+      { ...ctx, runId: "new-run" },
+    );
+    const newTurn = f.tracker.getCurrentState(ctx.sessionId)!.turnKey;
+    const replayCtx = { ...ctx, runId: "late-alias" };
+    await f.handlers.onBeforePromptBuild(first, replayCtx);
+    expect(f.turnAssociations.resolve(replayCtx.runId)?.turnKey).toBe(oldTurn);
+    expect(f.selector).toHaveBeenCalledTimes(2);
+    await f.handlers.onAgentEnd({ messages: [], success: true }, replayCtx);
+    expect(
+      f.tracker.getTurnState(ctx.sessionId, oldTurn)?.timestamps?.end,
+    ).toBeTruthy();
+    expect(f.tracker.getCurrentState(ctx.sessionId)?.turnKey).toBe(newTurn);
+    await f.handlers.onBeforePromptBuild(first, {
+      ...ctx,
+      runId: "closed-alias",
+    });
+    expect(f.turnAssociations.resolve("closed-alias")).toBeUndefined();
+    expect(
+      warn.mock.calls.some(([message]) =>
+        message.startsWith("before_prompt_build hook error"),
+      ),
+    ).toBe(false);
+  });
+
+  it.each(["unavailable", "error"] as const)(
+    "preserves a pending native turn’s persisted selection when replay is %s",
+    async (failure) => {
+      const before = fixture();
+      const admitted = {
+        ...event,
+        currentUserMessageId: "persisted-admission",
+      };
+      await before.handlers.onBeforePromptBuild(admitted, ctx);
+      const persisted = before.tracker.getCurrentState(ctx.sessionId)!;
+      expect(persisted.matchedSkills).toEqual(["fixture"]);
+      await before.handlers.disposePromptWork();
+      const after = fixture(before.root);
+      after.sessionLookup.mockResolvedValue(undefined);
+      if (failure === "error")
+        after.selector.mockRejectedValue(new Error("unavailable"));
+      else after.selector.mockResolvedValue(undefined);
+      await after.handlers.onBeforePromptBuild(admitted, {
+        ...ctx,
+        sessionKey: "",
+        runId: "replay",
+      });
+      expect(after.selector).toHaveBeenCalledOnce();
+      expect(after.tracker.getCurrentState(ctx.sessionId)).toEqual(persisted);
+      expect(after.turnAssociations.resolve("replay")?.turnKey).toBe(
+        persisted.turnKey,
+      );
+    },
+  );
+
+  it.each(["current", "history"] as const)(
+    "keeps a finalized legacy run from %s terminal after reload",
+    async (location) => {
+      const before = fixture();
+      await before.handlers.onBeforePromptBuild(event, ctx);
+      await before.handlers.onAgentEnd({ messages: [], success: true }, ctx);
+      if (location === "history")
+        await before.handlers.onBeforePromptBuild(event, {
+          ...ctx,
+          runId: "second",
+        });
+      const current = before.tracker.getCurrentState(ctx.sessionId);
+      await before.handlers.disposePromptWork();
+      const after = fixture(before.root);
+      after.sessionLookup.mockResolvedValue(undefined);
+      const warn = vi.spyOn(logger, "warn");
+      await after.handlers.onBeforePromptBuild(event, {
+        ...ctx,
+        sessionKey: "",
+      });
+      expect(after.turnAssociations.hasRun(ctx.runId)).toBe(true);
+      expect(after.turnAssociations.resolve(ctx.runId)).toBeUndefined();
+      expect(after.search).not.toHaveBeenCalled();
+      expect(after.selector).not.toHaveBeenCalled();
+      expect(after.tracker.getCurrentState(ctx.sessionId)).toEqual(current);
+      expect(
+        warn.mock.calls.some(([message]) =>
+          message.startsWith("before_prompt_build hook error"),
+        ),
+      ).toBe(false);
+    },
+  );
 
   it("keeps a deadline cancellation terminal across same-admission rebuilds", async () => {
     const f = fixture();
@@ -636,16 +737,10 @@ describe("prompt routing deadlines", () => {
     expect(f.selector).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    ["agent_end", "pending"],
-    ["agent_end", "completed"],
-    ["message_sending", "pending"],
-    ["message_sending", "completed"],
-  ] as const)(
-    "late %s for turn A preserves turn B's %s selector and cached result",
-    async (completion, phase) => {
+  it.each(["pending", "completed"] as const)(
+    "late agent_end for turn A preserves turn B’s %s selector and cached result",
+    async (phase) => {
       const f = fixture();
-      vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(false);
       await f.handlers.onBeforePromptBuild(event, ctx);
       const selection = deferred<typeof selected>(selected);
       f.selector.mockReturnValueOnce(selection.promise);
@@ -659,18 +754,14 @@ describe("prompt routing deadlines", () => {
           '<skill name="fixture">',
         );
       }
-      if (completion === "agent_end") {
-        await f.handlers.onAgentEnd(
-          {
-            runId: "turn",
-            messages: [{ role: "assistant", content: "Turn A complete" }],
-            success: true,
-          },
-          ctx,
-        );
-      } else {
-        await f.handlers.onMessageSending({ content: "Turn A complete" }, ctx);
-      }
+      await f.handlers.onAgentEnd(
+        {
+          runId: "turn",
+          messages: [{ role: "assistant", content: "Turn A complete" }],
+          success: true,
+        },
+        ctx,
+      );
       expect(
         f.tracker.getTurnState("session", "turn")?.timestamps?.end,
       ).toBeTruthy();

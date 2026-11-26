@@ -98,7 +98,7 @@ describe("SDK current request contract", () => {
     },
   );
 
-  it("uses the explicit request for tracking and both searches when the prompt reconstructs history", async () => {
+  it("uses the explicit request for tracking and skill search when the prompt reconstructs history", async () => {
     const h = promptHarness();
     await h.handlers.onBeforePromptBuild(
       {
@@ -353,14 +353,18 @@ describe("SDK run correlation contract", () => {
     },
   );
 
-  it("does not guess an anonymous owner when multiple anonymous turns are active", async () => {
+  it("does not guess an anonymous owner when distinct sessions share a key", async () => {
     const registry = new TurnAssociationRegistry();
     bind(registry, association);
-    bind(registry, { ...association, turnKey: "other-turn" });
+    bind(registry, {
+      ...association,
+      sessionId: "other-session",
+      turnKey: "other-turn",
+    });
     const h = correlationHarness(registry);
     await h.handlers.onAfterToolCall(
       { ...tool, runId: "newly-supplied-run" },
-      { ...ctx, runId: "newly-supplied-run" },
+      { ...ctx, sessionId: undefined, runId: "newly-supplied-run" },
     );
     expect(h.merge).not.toHaveBeenCalled();
   });

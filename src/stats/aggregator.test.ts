@@ -88,6 +88,49 @@ describe("StatsAggregator", () => {
   });
 
   describe("create", () => {
+    it("preserves historical skill_experience totals when loading schema v7", () => {
+      const oldState = createState({
+        turnKey: "old",
+        toolCalls: [{ name: "skill_experience", params: {} }],
+      });
+      expect(aggregator.record("test-session", oldState)).toBe(true);
+      const original = readStats();
+      expect(original.schemaVersion).toBe(7);
+      expect(original.tools.skill_experience.calls).toBe(1);
+      expect(original.daily["2026-06-11"].tools.skill_experience).toBe(1);
+      aggregator = StatsAggregator.create(tempDir);
+      expect(aggregator.listProcessedEventIds()).toContain(
+        "test-session:turn:old",
+      );
+      expect(
+        aggregator.record("test-session", createState({ turnKey: "new" })),
+      ).toBe(true);
+      const updated = readStats();
+      expect(updated.summary.turns).toBe(2);
+      expect(updated.tools.skill_experience).toEqual(
+        original.tools.skill_experience,
+      );
+      expect(updated.daily["2026-06-11"].tools.skill_experience).toBe(1);
+    });
+
+    it("excludes both legacy experience sources from QMD's injected skill total", () => {
+      const original = createState().intent!.inputSkillDiscovery!;
+      const injectedSkills = [
+        ...original.injectedSkills,
+        { name: "archive-qmd", source: "experience-qmd" },
+        { name: "archive-related", source: "experience-associated" },
+      ] as typeof original.injectedSkills;
+      expect(
+        aggregator.record(
+          "legacy-session",
+          createState({
+            inputSkillDiscovery: { ...original, injectedSkills },
+          }),
+        ),
+      ).toBe(true);
+      expect(readStats().skillDiscovery.qmdSearch.injectedSkills).toBe(1);
+    });
+
     it("records skill adoption, tools and daily totals without inventing an intent", () => {
       const legacy = createState();
       const state = createState({

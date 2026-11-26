@@ -71,11 +71,6 @@ const increment = (counts, key, count = 1) =>
   counts.set(key, (counts.get(key) ?? 0) + count);
 const counterDict = (counts) =>
   Object.fromEntries([...counts].sort(([a], [b]) => compare(a, b)));
-const topCounts = (counts, field) =>
-  [...counts]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, TOP_TARGETS)
-    .map(([name, count]) => ({ [field]: name, changes: count }));
 const pick = (value, keys) =>
   Object.fromEntries(keys.map((key) => [key, value[key] ?? null]));
 const nested = (value, ...keys) =>

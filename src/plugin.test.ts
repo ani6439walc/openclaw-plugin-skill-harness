@@ -8,6 +8,8 @@ import pluginEntry from "../index.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import * as skills from "./skills/index.js";
 import * as skillRoots from "./skills/roots.js";
+import * as reviewScheduling from "./review/scheduler.js";
+import type { ReviewCandidate } from "./review/scheduler.js";
 import {
   createWorkingSetSkillsResolver,
   createPlugin,
@@ -169,7 +171,7 @@ describe("createPlugin", () => {
     } as Partial<OpenClawPluginApi>);
 
     expect(() => createPlugin(api).register(api)).not.toThrow();
-    expect(api.on).toHaveBeenCalledTimes(9);
+    expect(api.on).toHaveBeenCalledTimes(8);
     expect(api.on).toHaveBeenCalledWith(
       "before_prompt_build",
       expect.any(Function),
@@ -192,7 +194,7 @@ describe("createPlugin", () => {
       lifecycle: { onDispose, registerRuntimeLifecycle: vi.fn() },
     });
     pluginEntry.register!(api);
-    expect(api.on).toHaveBeenCalledTimes(9);
+    expect(api.on).toHaveBeenCalledTimes(8);
     expect(
       api.registerTool.mock.calls.map(([, options]) => options.name),
     ).toEqual(["skill_list", "skill_search", "skill_view"]);
@@ -562,10 +564,74 @@ describe("createPlugin", () => {
       "before_agent_finalize",
       expect.any(Function),
     );
-    expect(api.on).toHaveBeenCalledWith(
+    expect(api.on).not.toHaveBeenCalledWith(
       "message_sending",
       expect.any(Function),
     );
+    expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
+  });
+
+  it("shares prompt turn activity with Review until agent_end, including tools after an outbound preamble", async () => {
+    const createScheduler = vi.spyOn(
+      reviewScheduling,
+      "createIntentReviewScheduler",
+    );
+    const api = createApi({
+      pluginConfig: { routing: { skills: { maxInjectedSkills: 0 } } },
+    });
+    createPlugin(api).register(api);
+    const isSystemActive = createScheduler.mock.calls[0][0]?.isSystemActive;
+    expect(isSystemActive).toBeTypeOf("function");
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+    const hook = (name: string) =>
+      api.on.mock.calls.find(([event]) => event === name)?.[1];
+    const ctx = {
+      agentId: "main",
+      sessionId: "preamble-session",
+      sessionKey: "agent:main:main",
+      messageProvider: "webchat",
+      trigger: "user",
+    };
+    const candidate = {
+      sessionKey: "",
+      ctx: { sessionKey: " " },
+      snapshot: { sessionKey: ctx.sessionKey },
+    } as ReviewCandidate;
+    expect(isSystemActive!(candidate)).toBe(false);
+    await hook("before_prompt_build")(
+      { prompt: "Check my tools", messages: [] },
+      ctx,
+    );
+    expect(isSystemActive!(candidate)).toBe(true);
+    await hook("message_sending")?.({ content: "Checking the inputs." }, ctx);
+    expect(
+      deps.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+    ).toBeUndefined();
+    await hook("after_tool_call")(
+      {
+        toolName: "skill_view",
+        params: { name: "fixture" },
+        result: JSON.stringify({
+          success: true,
+          name: "fixture",
+          path: "/skills/fixture/SKILL.md",
+          content: "Instructions",
+        }),
+      },
+      ctx,
+    );
+    expect(deps.tracker.getCurrentState(ctx.sessionId)?.skillsUsed).toEqual([
+      { name: "fixture", path: "/skills/fixture/SKILL.md" },
+    ]);
+    expect(isSystemActive!(candidate)).toBe(true);
+    await hook("agent_end")(
+      { messages: [{ role: "assistant", content: "Done." }], success: true },
+      ctx,
+    );
+    expect(
+      deps.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+    ).toBeTruthy();
+    expect(isSystemActive!(candidate)).toBe(false);
   });
 
   it("registers skill tools without legacy review command surfaces", () => {
