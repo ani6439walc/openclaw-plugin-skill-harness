@@ -1225,10 +1225,8 @@ export function createHookHandlers(deps: HookDeps) {
         refreshedConfig,
       );
       ctx.hookInvocation?.assertActive();
-      if (
-        latestUserMessage.trim().length <
-        refreshedConfig.routing.minTriggerChars
-      ) {
+      const requestLength = latestUserMessage.trim().length;
+      if (requestLength === 0) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       routing.association = await prepareTrackingTurn({
@@ -1252,7 +1250,10 @@ export function createHookHandlers(deps: HookDeps) {
       if (request) request.association = routing.association;
       promptExecutions.observe(routing.association);
 
-      if (refreshedConfig.routing.skills.maxInjectedSkills === 0) {
+      if (
+        requestLength < refreshedConfig.routing.minTriggerChars ||
+        refreshedConfig.routing.skills.maxInjectedSkills === 0
+      ) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 

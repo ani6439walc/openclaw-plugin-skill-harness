@@ -244,7 +244,7 @@ After rebuilding an existing linked installation, use `openclaw plugins reload s
 
 Continue using your agent normally. By default, dynamic routing applies to agent `main` in direct chats, uses recent conversation context, and injects up to **8 skills**.
 
-Automatic skill routing requires at least `routing.minTriggerChars` characters in the trimmed current request (default `5`, positive integer). Length uses JavaScript UTF-16 code units; most Chinese characters count as one. The check runs before adding conversation history, so earlier messages cannot make a short current request pass. Short requests keep static working-set guidance and access to manual skill tools. Set `routing.minTriggerChars` to `1` to allow single-character requests; blank input remains excluded.
+Automatic skill routing requires at least `routing.minTriggerChars` characters in the trimmed current request (default `5`, positive integer). Length uses JavaScript UTF-16 code units; most Chinese characters count as one. The check runs before adding conversation history, so earlier messages cannot make a short current request pass. Short requests keep static working-set guidance and access to manual skill tools. A successful manual load in a nonblank short request counts toward Review at the end of that turn. Set `routing.minTriggerChars` to `1` to allow single-character requests; blank input remains excluded.
 
 To change scope or limits, merge a routing fragment into the plugin configuration:
 
@@ -295,7 +295,7 @@ Merge this into the plugin configuration to enable background relation review.
 }
 ```
 
-Omit the example `model` to use the session or agent model. Set `review.triggers.relationHealthCheck.everyTurns` to change the interval (an integer from 1 to 1,000, default 10). For example, at the default interval a session with nine qualifying turns can have several turns without skills before the next recommendation or successful load makes the tenth. Runs are debounced and serialized in the background. Each session persists its count across restarts. On upgrade, the tracker initializes the count from identifiable, completed skill-bearing turns still present in that session. This does not replay past reviews. Background scheduling is best effort: a restart can discard a queued check, and reconstructing a missing reply from transcript history alone does not launch a reviewer.
+Omit the example `model` to use the session or agent model. Set `review.triggers.relationHealthCheck.everyTurns` to change the interval (an integer from 1 to 1,000, default 10). For example, at the default interval a session with nine qualifying turns can have several turns without skills before the next recommendation or successful load makes the tenth. Runs are debounced and serialized in the background. Each session persists its count across restarts. On upgrade, the tracker initializes the count from identifiable, completed skill-bearing turns still present in that session. This does not replay past reviews. Background scheduling is best effort: a restart can discard a queued check, and transcript text alone cannot confirm a turn for the cadence.
 
 When upgrading from a multi-trigger build, remove `review.triggers.routingUncertainty`, `review.triggers.capabilityFit`, and `review.triggers.relationHealthCheck.enabled`. Both configuration validators reject these fields. To disable all background checks, set `review.enabled` to `false`; to use a custom interval, keep `everyTurns`. Existing schema-v9 Review receipts retain their original trigger labels.
 

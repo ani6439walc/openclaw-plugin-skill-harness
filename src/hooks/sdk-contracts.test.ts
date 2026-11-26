@@ -91,7 +91,7 @@ describe("SDK current request contract", () => {
         SKILL_HARNESS_SYSTEM_CONTEXT,
       );
       expect(h.tracker.preparePromptTurn).toHaveBeenCalledTimes(
-        expected ? 1 : 0,
+        input.trim() ? 1 : 0,
       );
       expect(h.skillSearch).toHaveBeenCalledTimes(expected ? 1 : 0);
       if (!expected) expect(h.selector).not.toHaveBeenCalled();

@@ -253,66 +253,165 @@ describe("SessionTracker exact-turn finalization", () => {
     expect(JSON.parse(fs.readFileSync(file, "utf8")).skillTurnCount).toBe(10);
   });
 
-  it("counts an unambiguous recovered completion and lets only its exact terminal callback admit it", async () => {
+  it("reserves the tenth ordinal for the exact terminal after a tool-use preamble", async () => {
+    for (let i = 1; i <= 9; i++) {
+      const runId = `seed-${i}`;
+      await prepare(runId, runId);
+      await tracker.mergeTurnAndPersist({
+        sessionId: "session-a",
+        expectedTurnKey: runId,
+        data: { matchedSkills: ["alpha"] },
+      });
+      await tracker.finalizeTurnFromAgentEnd({
+        sessionId: "session-a",
+        expectedTurnKey: runId,
+        endedAt: "2026-08-12T00:00:03.000Z",
+      });
+    }
     await prepare("recovered", "unique");
     await tracker.mergeTurnAndPersist({
       sessionId: "session-a",
       expectedTurnKey: "recovered",
       data: { matchedSkills: ["alpha"] },
     });
-    await prepare("repeat-1", "same");
+    await tracker.preparePromptTurn({
+      sessionId: "session-a",
+      agentId: "main",
+      runId: "repeat-1",
+      input: "same",
+      startedAt: "2026-08-12T00:00:03.000Z",
+      recentTurns: [
+        { role: "user", text: "unique" },
+        { role: "assistant", text: "Checking the inputs." },
+      ],
+    });
     await prepare("repeat-2", "same");
-    await prepare("ambiguous-reply", "repeated transcript input");
-    const recentTurns = [
-      { role: "user", text: "same" },
-      { role: "assistant", text: "ambiguous" },
-      { role: "user", text: "repeated transcript input" },
-      { role: "assistant", text: "old" },
-      { role: "user", text: "repeated transcript input" },
-      { role: "assistant", text: "new" },
-      { role: "user", text: "unique" },
-      { role: "assistant", text: "verified" },
-    ];
+    await tracker.preparePromptTurn({
+      sessionId: "session-a",
+      agentId: "main",
+      runId: "ambiguous-reply",
+      input: "repeated transcript input",
+      startedAt: "2026-08-12T00:00:04.000Z",
+      recentTurns: [
+        { role: "user", text: "same" },
+        { role: "assistant", text: "ambiguous" },
+      ],
+    });
     const next = {
       sessionId: "session-a",
       agentId: "main",
       runId: "current",
       input: "next",
       startedAt: "2026-08-12T00:00:04.000Z",
-      recentTurns,
+      recentTurns: [
+        { role: "user", text: "same" },
+        { role: "assistant", text: "ambiguous" },
+        { role: "user", text: "repeated transcript input" },
+        { role: "assistant", text: "old" },
+        { role: "user", text: "repeated transcript input" },
+        { role: "assistant", text: "new" },
+        { role: "user", text: "unique" },
+        { role: "assistant", text: "Checking the inputs." },
+      ],
     };
     await tracker.preparePromptTurn(next);
     await tracker.preparePromptTurn(next);
     tracker = SessionTracker.create(root);
     expect(
-      tracker.getReviewSnapshotForTurn("session-a", "recovered")?.turnNumber,
-    ).toBe(1);
+      tracker.getReviewSnapshotForTurn("session-a", "recovered"),
+    ).toBeUndefined();
+    const pending = tracker.getTurnState("session-a", "recovered")!;
+    expect(pending.assistantReplyObserved).toBe(true);
+    expect(pending.result).toBeUndefined();
+    expect(pending.timestamps?.end).toBeUndefined();
+    expect(pending.skillTurnNumber).toBeUndefined();
     for (const id of ["repeat-1", "repeat-2", "ambiguous-reply"]) {
       expect(
-        tracker.getTurnState("session-a", id)?.timestamps?.end,
+        tracker.getTurnState("session-a", id)?.assistantReplyObserved,
       ).toBeUndefined();
     }
-    const terminal = {
+    const finish = {
       sessionId: "session-a",
       expectedTurnKey: "recovered",
-      result: "verified",
-      endedAt: "2026-08-12T00:00:03.000Z",
+      result: "The relation is supported.",
+      endedAt: "2026-08-12T00:00:05.000Z",
     };
-    expect(
-      await tracker.finalizeTurnFromAgentEnd({
-        ...terminal,
-        result: "wrong result",
-      }),
-    ).toBe("stale");
-    expect(await tracker.finalizeTurnFromAgentEnd(terminal)).toBe(
-      "became-review-eligible",
-    );
-    expect(await tracker.finalizeTurnFromAgentEnd(terminal)).toBe(
+    expect(await tracker.finalizeTurnFromAgentEnd(finish)).toBe("applied");
+    expect(await tracker.finalizeTurnFromAgentEnd(finish)).toBe(
       "already-finalized",
     );
     expect(
-      tracker.getReviewSnapshotForTurn("session-a", "recovered")?.turnNumber,
-    ).toBe(1);
+      await tracker.finalizeTurnFromAgentEnd({
+        ...finish,
+        result: "conflicting terminal",
+      }),
+    ).toBe("stale");
+    expect(
+      tracker.getTurnState("session-a", "recovered")?.assistantReplyObserved,
+    ).toBeUndefined();
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", "recovered"),
+    ).toMatchObject({
+      turnNumber: 10,
+      current: { result: finish.result, timestamps: { end: finish.endedAt } },
+    });
+  });
+
+  it("rebinds a retained pending run on replay after reload without replacing the current run", async () => {
+    await prepare("retained", "first");
+    await tracker.mergeTurnAndPersist({
+      sessionId: "session-a",
+      expectedTurnKey: "retained",
+      data: { matchedSkills: ["alpha"] },
+    });
+    await prepare("newer", "second");
+    tracker = SessionTracker.create(root);
+    const file = sessionsPath("session-a.json", root);
+    const before = fs.readFileSync(file, "utf8");
+    const replay = await tracker.preparePromptTurn({
+      sessionId: "session-a",
+      agentId: "main",
+      runId: "retained",
+      input: "first",
+      startedAt: "2026-08-12T00:00:10.000Z",
+      recentTurns: [
+        { role: "user", text: "second" },
+        { role: "assistant", text: "unrelated" },
+      ],
+    });
+    expect(replay).toEqual({
+      status: "reused",
+      identity: { turnKey: "retained", reused: true },
+    });
+    expect(fs.readFileSync(file, "utf8")).toBe(before);
+    if (replay.status !== "reused")
+      throw new Error("missing retained association");
+    expect(
+      await tracker.mergeTurnAndPersist({
+        sessionId: "session-a",
+        expectedTurnKey: replay.identity.turnKey,
+        currentTurnOnly: true,
+        data: { matchedSkills: ["wrong"] },
+      }),
+    ).toBe("stale");
+    expect(
+      await tracker.finalizeTurnFromAgentEnd({
+        sessionId: "session-a",
+        expectedTurnKey: replay.identity.turnKey,
+        result: "first answer",
+        endedAt: "2026-08-12T00:00:11.000Z",
+      }),
+    ).toBe("applied");
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", "retained"),
+    ).toMatchObject({
+      turnNumber: 1,
+      current: { matchedSkills: ["alpha"], result: "first answer" },
+    });
+    expect(tracker.getCurrentState("session-a")?.turnKey).toBe("newer");
+    expect(
+      tracker.getCurrentState("session-a")?.timestamps?.end,
+    ).toBeUndefined();
   });
 
   it.each([false, true])(

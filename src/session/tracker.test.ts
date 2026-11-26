@@ -616,6 +616,29 @@ describe("SessionTracker", () => {
       expect(fs.readFileSync(file, "utf8")).toBe(original);
     });
 
+    it("uses an observed reply to distinguish an anonymous repeat while awaiting the exact close", async () => {
+      const first = await persistSessionFixture(tracker, "session-a", {
+        current: { input: "repeat", matchedSkills: ["alpha"] },
+      });
+      const repeat = await tracker.preparePromptTurn({
+        sessionId: "session-a",
+        agentId: "main",
+        input: "repeat",
+        startedAt: "2026-08-12T00:00:01.000Z",
+        recentTurns: [
+          { role: "user", text: "repeat" },
+          { role: "assistant", text: "Checking inputs." },
+        ],
+      });
+      expect(repeat.status).toBe("applied");
+      const previous = tracker.getTurnState("session-a", first);
+      expect(previous?.assistantReplyObserved).toBe(true);
+      expect(previous?.timestamps?.end).toBeUndefined();
+      expect(
+        tracker.getReviewSnapshotForTurn("session-a", first),
+      ).toBeUndefined();
+    });
+
     it("checks forced preparation ownership before changing persisted or in-memory state", async () => {
       const params = {
         sessionId: "session-a",

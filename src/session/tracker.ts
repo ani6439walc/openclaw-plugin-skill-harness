@@ -103,7 +103,8 @@ export interface IntentState {
 
 export interface SessionState {
   skillTurnNumber?: number;
-  reviewAwaitingFinalization?: true;
+  /** Distinguishes repeated anonymous inputs before an exact terminal notification. */
+  assistantReplyObserved?: true;
   turnKey?: string;
   input?: string;
   matchedSkills?: string[];
@@ -266,6 +267,32 @@ function initializeSkillTurnCount(session: SessionData): void {
     const id = resolveTurnEventId(session.sessionId, turn);
     if (id && !seen.has(id) && recordSkillTurn(session, turn)) seen.add(id);
   }
+}
+
+function observedReplyToCurrentInput(
+  session: SessionData,
+  recent: readonly RecentTurn[],
+): boolean {
+  const input = session.current.input?.trim();
+  if (
+    !input ||
+    session.current.assistantReplyObserved ||
+    session.current.timestamps?.end
+  )
+    return false;
+  const index = recent.findIndex(
+    (turn) => turn.role === "user" && turn.text.trim() === input,
+  );
+  const reply = recent[index + 1];
+  return (
+    index !== -1 &&
+    reply?.role === "assistant" &&
+    Boolean(reply.text.trim()) &&
+    !recent
+      .slice(index + 1)
+      .some((turn) => turn.role === "user" && turn.text.trim() === input) &&
+    !session.history?.some((turn) => turn.input?.trim() === input)
+  );
 }
 
 function createReviewState(
@@ -665,49 +692,33 @@ export class SessionTracker {
           mutate: (session) => {
             params.assertActive?.();
             const current = session.current;
-            let recovered = false;
-            if (params.recentTurns?.length) {
-              // Text is the only available association here. A repeated prompt in
-              // either history cannot identify which exact turn the reply closed.
-              const answers = new Map<string, string | undefined>();
-              for (let i = 0; i < params.recentTurns.length; i++) {
-                const turn = params.recentTurns[i];
-                if (turn.role !== "user") continue;
-                const input = turn.text.trim();
-                const next = params.recentTurns[i + 1];
-                answers.set(
-                  input,
-                  !answers.has(input) && next?.role === "assistant"
-                    ? next.text.trim()
-                    : undefined,
-                );
-              }
-              const states = new Map<string, SessionState | undefined>();
-              for (const state of [...(session.history ?? []), current]) {
-                const input = state.input?.trim();
-                if (input && answers.get(input)) {
-                  states.set(input, states.has(input) ? undefined : state);
-                }
-              }
-              for (const [input, state] of states) {
-                if (!state || state.result) continue;
-                state.result = answers.get(input)!;
-                recovered = true;
-                if (!state.timestamps?.end) {
-                  state.timestamps = {
-                    ...state.timestamps,
-                    end: params.startedAt,
-                  };
-                  if (recordSkillTurn(session, state)) {
-                    state.reviewAwaitingFinalization = true;
-                  }
-                }
-              }
+            // Rebuild a lost run association without rotating a newer turn or
+            // applying the replayed prompt's transcript to its session state.
+            if (
+              requestedRunId &&
+              requestedRunId !== current.turnKey &&
+              session.history?.some((turn) => turn.turnKey === requestedRunId)
+            ) {
+              return {
+                result: {
+                  status: "reused" as const,
+                  identity: { turnKey: requestedRunId, reused: true },
+                },
+                changed: false,
+              };
             }
+            // A matching assistant text may be a tool-use preamble. It can
+            // distinguish an anonymous repeat, but only an exact hook closes a turn.
+            const observedReply = Boolean(
+              params.recentTurns?.length &&
+              observedReplyToCurrentInput(session, params.recentTurns),
+            );
+            if (observedReply) current.assistantReplyObserved = true;
 
             const reusableWithoutRunId =
               !params.forceNew &&
               !requestedRunId &&
+              !current.assistantReplyObserved &&
               !current.timestamps?.end &&
               current.turnKey &&
               current.input?.trim() === params.input.trim();
@@ -720,7 +731,7 @@ export class SessionTracker {
                   status: "reused" as const,
                   identity: { turnKey: current.turnKey!, reused: true },
                 },
-                changed: recovered,
+                changed: observedReply,
               };
             }
 
@@ -859,11 +870,7 @@ export class SessionTracker {
               target.error = params.error;
               updated = true;
             }
-            if (
-              recordSkillTurn(session, target) ||
-              target.reviewAwaitingFinalization
-            ) {
-              delete target.reviewAwaitingFinalization;
+            if (recordSkillTurn(session, target)) {
               return {
                 result: "became-review-eligible" as const,
                 changed: true,
@@ -875,6 +882,7 @@ export class SessionTracker {
             };
           }
 
+          delete target.assistantReplyObserved;
           if (params.result !== undefined) target.result = params.result;
           if (params.error !== undefined) target.error = params.error;
           target.timestamps = {

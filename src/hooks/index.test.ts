@@ -1551,9 +1551,14 @@ description: Navigate Tokyo.
     }
   });
 
-  it.each([1, 2])(
-    "evaluates a manual skill load for Review with dynamic routing disabled (cadence %i)",
-    async (everyTurns) => {
+  it.each([
+    { everyTurns: 1, prompt: "Run the manual workflow", limit: 0, load: true },
+    { everyTurns: 2, prompt: "Run the manual workflow", limit: 0, load: true },
+    { everyTurns: 1, prompt: "繼續", limit: 5, load: true },
+    { everyTurns: 1, prompt: "繼續", limit: 5, load: false },
+  ])(
+    "tracks eligibility when dynamic routing skips ($prompt, load=$load, cadence=$everyTurns)",
+    async ({ everyTurns, prompt, limit, load }) => {
       const root = fs.mkdtempSync(
         path.join(os.tmpdir(), "manual-skill-review-"),
       );
@@ -1573,7 +1578,7 @@ description: Navigate Tokyo.
         {
           config: () =>
             resolveConfig({
-              routing: { skills: { maxInjectedSkills: 0 } },
+              routing: { skills: { maxInjectedSkills: limit } },
               review: {
                 enabled: true,
                 model: "fixture/review",
@@ -1597,37 +1602,35 @@ description: Navigate Tokyo.
         messageProvider: "webchat",
       };
       try {
-        await handlers.onBeforePromptBuild(
-          { prompt: "Run the manual workflow", messages: [] },
-          ctx,
-        );
+        await handlers.onBeforePromptBuild({ prompt, messages: [] }, ctx);
         expect(tracker.getCurrentState(ctx.sessionId)?.turnKey).toBe(ctx.runId);
-        await handlers.onAfterToolCall(
-          {
-            toolName: "skill_view",
-            params: { name: "manual" },
-            result: JSON.stringify({
-              success: true,
-              name: "manual",
-              content: "Manual instructions",
-              path: path.join(root, "skills/manual/SKILL.md"),
-            }),
-          },
-          ctx,
-        );
+        if (load)
+          await handlers.onAfterToolCall(
+            {
+              toolName: "skill_view",
+              params: { name: "manual" },
+              result: JSON.stringify({
+                success: true,
+                name: "manual",
+                content: "Manual instructions",
+                path: path.join(root, "skills/manual/SKILL.md"),
+              }),
+            },
+            ctx,
+          );
         await handlers.onAgentEnd({ messages: [], success: true }, ctx);
         await handlers.onMessageSending({ content: "done" }, ctx);
 
         expect(search).not.toHaveBeenCalled();
         expect(routingSelector).not.toHaveBeenCalled();
         const state = tracker.getCurrentState(ctx.sessionId)!;
-        expect(state.skillsUsed?.map((skill) => skill.name)).toEqual([
-          "manual",
-        ]);
+        expect(state.skillsUsed?.map((skill) => skill.name) ?? []).toEqual(
+          load ? ["manual"] : [],
+        );
         expect(state.matchedSkills).toBeUndefined();
         expect(statsAggregator.isRecordable(ctx.sessionId, state)).toBe(false);
         expect(statsAggregator.listProcessedEventIds().size).toBe(0);
-        if (everyTurns === 1) {
+        if (load && everyTurns === 1) {
           expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
           expect(reviewScheduler.schedule.mock.calls[0][0]).toMatchObject({
             snapshot: {
