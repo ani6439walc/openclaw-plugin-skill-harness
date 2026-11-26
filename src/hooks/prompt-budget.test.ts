@@ -1691,6 +1691,75 @@ describe("native admission identity", () => {
     },
   );
 
+  it.each(["sdk-hit", "lookup-miss"] as const)(
+    "keeps an earlier replay alias's own %s key through binding after a later sibling resolves a different SDK key",
+    async (outcome) => {
+      const { f, admitted, retained, newer, replayCtx } =
+        await retainedReplayFixture();
+      const firstLookup =
+        deferred<Awaited<ReturnType<typeof f.sessionLookup>>>(undefined);
+      const siblingLookup =
+        deferred<Awaited<ReturnType<typeof f.sessionLookup>>>(undefined);
+      f.sessionLookup
+        .mockReturnValueOnce(firstLookup.promise)
+        .mockReturnValueOnce(siblingLookup.promise);
+
+      const { sessionId } = replayCtx;
+      const persistedKey = f.tracker.getNativeTurnIdentity(
+        sessionId,
+        ctx.agentId,
+        admitted.currentUserMessageId,
+      )?.sessionKey;
+      expect(persistedKey).toBe(ctx.sessionKey);
+      const aliasKey =
+        outcome === "sdk-hit"
+          ? "agent:main:discord:direct:alias-b-own-sdk"
+          : persistedKey!;
+      const siblingKey = "agent:main:discord:direct:sibling-later-sdk";
+      const runB = "replay-alias-b-first";
+      const runSibling = "replay-alias-sibling-later";
+
+      const aliasB = f.handlers.onBeforePromptBuild(admitted, {
+        ...replayCtx,
+        runId: runB,
+      });
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+
+      const sibling = f.handlers.onBeforePromptBuild(admitted, {
+        ...replayCtx,
+        runId: runSibling,
+      });
+      await until(() => f.sessionLookup.mock.calls.length === 2);
+
+      // Later sibling resolves first with a different SDK key.
+      siblingLookup.resolve({ sessionKey: siblingKey, entry: { sessionId } });
+      await sibling;
+
+      // Alias B receives its own settlement under its own SDK or persisted key.
+      await settleRun(
+        f.handlers,
+        { runId: runB, sessionKey: aliasKey },
+        `alias b ${outcome} reply`,
+      );
+      expect(
+        f.tracker.getTurnState(sessionId, retained)?.timestamps?.end,
+      ).toBeUndefined();
+
+      firstLookup.resolve(
+        outcome === "sdk-hit"
+          ? { sessionKey: aliasKey, entry: { sessionId } }
+          : undefined,
+      );
+      await aliasB;
+
+      expect(f.tracker.getTurnState(sessionId, retained)).toMatchObject({
+        result: `alias b ${outcome} reply`,
+        timestamps: { end: expect.any(String) },
+      });
+      expect(f.tracker.getCurrentState(sessionId)).toEqual(newer);
+    },
+  );
+
   it("publishes a sibling run's newer host key before yielding so earlier SDK callbacks cannot evict it", async () => {
     const f = fixture();
     const sdkKey = "agent:main:discord:direct:sdk-before-sibling-host";

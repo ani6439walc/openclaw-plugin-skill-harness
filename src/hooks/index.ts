@@ -621,15 +621,27 @@ export function createHookHandlers(deps: HookDeps) {
   function retainPromptSessionKey(
     request: PromptRequestOwner<string | undefined>,
     identity: PromptBuildIdentity,
+    options?: { independentLookup?: boolean },
   ): void {
+    const shareIdentity =
+      !options?.independentLookup ||
+      identity.sessionKeyPriority === SESSION_KEY_PRIORITY.host;
+    const useShared =
+      !options?.independentLookup ||
+      request.sessionKeyPriority === SESSION_KEY_PRIORITY.host;
     if (
+      shareIdentity &&
       identity.resolvedSessionKey &&
       (!request.resolvedSessionKey || canUpdateSessionKey(request, identity))
     ) {
       request.resolvedSessionKey = identity.resolvedSessionKey;
       request.sessionKeyPriority = identity.sessionKeyPriority;
       request.sessionKeySeq = identity.sessionKeySeq;
-    } else if (request.resolvedSessionKey) {
+    } else if (
+      useShared &&
+      request.resolvedSessionKey &&
+      (!identity.resolvedSessionKey || canUpdateSessionKey(identity, request))
+    ) {
       identity.resolvedSessionKey = request.resolvedSessionKey;
       identity.sessionKeyPriority = request.sessionKeyPriority;
       identity.sessionKeySeq = request.sessionKeySeq;
@@ -1535,10 +1547,11 @@ export function createHookHandlers(deps: HookDeps) {
           request: nativeRequest,
         });
       }
+      const independentLookup = Boolean(replay);
       const routing = await resolvePromptBuildIdentity(
         ctx,
-        replay ? undefined : request,
-        !replay && admissionId !== undefined,
+        independentLookup ? undefined : request,
+        !independentLookup && admissionId !== undefined,
         invocationSeq,
       );
       assertRequestActive(true);
@@ -1550,7 +1563,7 @@ export function createHookHandlers(deps: HookDeps) {
             () => undefined,
           );
           assertRequestActive(true);
-          retainPromptSessionKey(nativeRequest, routing);
+          retainPromptSessionKey(nativeRequest, routing, { independentLookup });
           updatePendingSessionKey(
             pendingNative,
             routing.resolvedSessionKey,
@@ -1567,7 +1580,7 @@ export function createHookHandlers(deps: HookDeps) {
         }
       }
       if (nativeRequest) {
-        retainPromptSessionKey(nativeRequest, routing);
+        retainPromptSessionKey(nativeRequest, routing, { independentLookup });
         updatePendingSessionKey(
           pendingNative,
           routing.resolvedSessionKey,
@@ -1610,7 +1623,12 @@ export function createHookHandlers(deps: HookDeps) {
       );
       assertRequestActive(true);
       if (nativeRequest) {
-        retainPromptSessionKey(nativeRequest, routing);
+        retainPromptSessionKey(nativeRequest, routing, { independentLookup });
+        updatePendingSessionKey(
+          pendingNative,
+          routing.resolvedSessionKey,
+          routing,
+        );
         // A no-op await here would let another invocation start preparation
         // between checking for tracked work and deciding whether to route.
         if (nativeRequest.association || nativeRequest.preparation)
