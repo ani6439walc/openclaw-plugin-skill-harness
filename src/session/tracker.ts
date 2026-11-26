@@ -713,14 +713,15 @@ export class SessionTracker {
     sessionId: string,
     agentId: string,
     nativeAdmissionId: string,
-  ): PromptTurnIdentity | undefined {
+  ): (PromptTurnIdentity & { sessionKey?: string }) | undefined {
     const session = this.sessionData.get(sessionId);
     if (!session) return;
     const identity = findNativeTurn(
       session,
       digestNativeAdmission(sessionId, agentId, nativeAdmissionId),
     );
-    return identity === "ambiguous" ? undefined : identity;
+    if (!identity || identity === "ambiguous") return;
+    return { ...identity, sessionKey: session.sessionKey };
   }
 
   async preparePromptTurn(params: {
@@ -822,7 +823,8 @@ export class SessionTracker {
               ];
             }
             const turnKey = requestedRunId || randomUUID();
-            session.sessionKey = params.sessionKey;
+            if (params.sessionKey !== undefined)
+              session.sessionKey = params.sessionKey;
             session.agentId = params.agentId;
             session.current = {
               turnKey,

@@ -66,7 +66,7 @@ export class PromptExecutions<T> {
       agentId: string,
       sessionId: string,
       admissionId: string,
-    ) => { turnKey: string; finalized?: true } | undefined,
+    ) => Omit<TurnAssociation, "sessionId"> | undefined,
   ): PromptRequestOwner<T> | undefined {
     this.assertActive();
     const scope = JSON.stringify([params.agentId, params.sessionId]);
@@ -107,6 +107,7 @@ export class PromptExecutions<T> {
             retainedReplay: {
               sessionId: params.sessionId,
               turnKey: retained.turnKey,
+              sessionKey: retained.sessionKey,
               finalized: retained.finalized,
             },
           }

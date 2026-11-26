@@ -1650,121 +1650,140 @@ description: Navigate Tokyo.
     },
   );
 
-  it("deduplicates completed native admissions and resumes pending ones after hook reload", async () => {
-    const root = fs.mkdtempSync(
-      path.join(os.tmpdir(), "native-review-reload-"),
-    );
-    const reviewScheduler = createMockReviewScheduler();
-    const config = resolveConfig({
-      review: { enabled: true, model: "fixture/review" },
-    });
-    const ctx = {
-      agentId: "main",
-      sessionId: "reloaded-session",
-      sessionKey: "agent:main:main",
-      trigger: "user" as const,
-      messageProvider: "webchat",
-    };
-    function generation() {
-      const tracker = SessionTracker.create(root);
-      const handlers = createHandlers(
-        {
-          config: {},
-          runtime: {
-            state: { resolveStateDir: () => root },
-            agent: { resolveAgentWorkspaceDir: () => root },
-          },
-        },
-        {
-          config: () => config,
-          dataRoot: root,
-          tracker,
-          statsAggregator: StatsAggregator.create(root),
-          reviewScheduler,
-        },
+  it.each([false, true])(
+    "deduplicates completed native admissions and resumes pending ones after hook reload (newer owner: %s)",
+    async (newerOwner) => {
+      const root = fs.mkdtempSync(
+        path.join(os.tmpdir(), "native-review-reload-"),
       );
-      return {
-        tracker,
-        dispose: () => handlers.disposePromptWork(),
-        prompt: (id: string, runId: string) =>
-          handlers.onBeforePromptBuild(
-            {
-              currentUserMessageId: id,
-              currentUserMessage: "繼續",
-              prompt: "繼續",
-              messages: [],
-            },
-            { ...ctx, runId },
-          ),
-        load: (runId: string) =>
-          handlers.onAfterToolCall(
-            {
-              toolName: "skill_view",
-              params: { name: "manual" },
-              result: JSON.stringify({
-                success: true,
-                name: "manual",
-                content: "Manual instructions",
-                path: path.join(root, "skills/manual/SKILL.md"),
-              }),
-            },
-            { ...ctx, runId },
-          ),
-        end: (runId: string) =>
-          handlers.onAgentEnd(
-            { messages: [], success: true },
-            { ...ctx, runId },
-          ),
+      const reviewScheduler = createMockReviewScheduler();
+      const config = resolveConfig({
+        review: { enabled: true, model: "fixture/review" },
+      });
+      const ctx = {
+        agentId: "main",
+        sessionId: "reloaded-session",
+        sessionKey: "agent:main:main",
+        trigger: "user" as const,
+        messageProvider: "webchat",
       };
-    }
-    let f = generation();
-    const reload = async () => {
-      await f.dispose();
-      f = generation();
-    };
-    try {
-      for (let i = 1; i <= 9; i++) {
-        await f.prompt(`message-${i}`, `run-${i}`);
-        await f.load(`run-${i}`);
-        await f.end(`run-${i}`);
+      function generation() {
+        const tracker = SessionTracker.create(root);
+        const handlers = createHandlers(
+          {
+            config: {},
+            runtime: {
+              state: { resolveStateDir: () => root },
+              agent: { resolveAgentWorkspaceDir: () => root },
+            },
+          },
+          {
+            config: () => config,
+            dataRoot: root,
+            tracker,
+            statsAggregator: StatsAggregator.create(root),
+            reviewScheduler,
+          },
+        );
+        return {
+          tracker,
+          dispose: () => handlers.disposePromptWork(),
+          prompt: (
+            id: string,
+            runId: string,
+            sessionKey: string | undefined = ctx.sessionKey,
+          ) =>
+            handlers.onBeforePromptBuild(
+              {
+                currentUserMessageId: id,
+                currentUserMessage: "繼續",
+                prompt: "繼續",
+                messages: [],
+              },
+              { ...ctx, runId, sessionKey },
+            ),
+          load: (runId: string) =>
+            handlers.onAfterToolCall(
+              {
+                toolName: "skill_view",
+                params: { name: "manual" },
+                result: JSON.stringify({
+                  success: true,
+                  name: "manual",
+                  content: "Manual instructions",
+                  path: path.join(root, "skills/manual/SKILL.md"),
+                }),
+              },
+              { ...ctx, runId },
+            ),
+          end: (runId: string) =>
+            handlers.onAgentEnd(
+              { messages: [], success: true },
+              { ...ctx, runId },
+            ),
+        };
       }
-      const ninth = f.tracker.getCurrentState(ctx.sessionId)!;
-      expect(ninth.skillTurnNumber).toBe(9);
-      expect(ninth.timestamps?.end).toBeTruthy();
-      expect(reviewScheduler.schedule).not.toHaveBeenCalled();
+      let f = generation();
+      const reload = async () => {
+        await f.dispose();
+        f = generation();
+      };
+      try {
+        for (let i = 1; i <= 9; i++) {
+          await f.prompt(`message-${i}`, `run-${i}`);
+          await f.load(`run-${i}`);
+          await f.end(`run-${i}`);
+        }
+        const ninth = f.tracker.getCurrentState(ctx.sessionId)!;
+        expect(ninth.skillTurnNumber).toBe(9);
+        expect(ninth.timestamps?.end).toBeTruthy();
+        expect(reviewScheduler.schedule).not.toHaveBeenCalled();
 
-      await reload();
-      await f.prompt("message-9", "run-9");
-      await f.load("run-9");
-      await f.end("run-9");
-      expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(ninth);
-      expect(reviewScheduler.schedule).not.toHaveBeenCalled();
+        await reload();
+        await f.prompt("message-9", "run-9");
+        await f.load("run-9");
+        await f.end("run-9");
+        expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(ninth);
+        expect(reviewScheduler.schedule).not.toHaveBeenCalled();
 
-      // A distinct admission may legitimately reuse the predecessor's run alias.
-      await reload();
-      await f.prompt("message-10", "run-9");
-      const pending = f.tracker.getCurrentState(ctx.sessionId)!;
-      expect(pending.turnKey).not.toBe(ninth.turnKey);
-      expect(pending.timestamps?.end).toBeUndefined();
-      await reload();
-      await f.prompt("message-10", "run-10");
-      expect(f.tracker.getCurrentState(ctx.sessionId)?.turnKey).toBe(
-        pending.turnKey,
-      );
-      await f.load("run-10");
-      await f.end("run-10");
-      expect(f.tracker.getCurrentState(ctx.sessionId)?.skillTurnNumber).toBe(
-        10,
-      );
-      expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
-      expect(
-        reviewScheduler.schedule.mock.calls[0][0].snapshot.turnNumber,
-      ).toBe(10);
-    } finally {
-      await f.dispose();
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
+        // A distinct admission may legitimately reuse the predecessor's run alias.
+        await reload();
+        await f.prompt("message-10", "run-9");
+        const pending = f.tracker.getCurrentState(ctx.sessionId)!;
+        expect(pending.turnKey).not.toBe(ninth.turnKey);
+        expect(pending.timestamps?.end).toBeUndefined();
+        await reload();
+        if (newerOwner) await f.prompt("message-11", "run-11");
+        const currentKey = f.tracker.getCurrentState(ctx.sessionId)!.turnKey;
+        await f.prompt(
+          "message-10",
+          "run-10",
+          newerOwner ? "" : ctx.sessionKey,
+        );
+        expect(f.tracker.getCurrentState(ctx.sessionId)?.turnKey).toBe(
+          currentKey,
+        );
+        await f.load("run-10");
+        await f.end("run-10");
+        await f.end("run-10");
+        expect(
+          f.tracker.getTurnState(ctx.sessionId, pending.turnKey!)
+            ?.skillTurnNumber,
+        ).toBe(10);
+        if (newerOwner)
+          expect(
+            f.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+          ).toBeUndefined();
+        expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
+        expect(
+          reviewScheduler.schedule.mock.calls[0][0].snapshot.turnNumber,
+        ).toBe(10);
+      } finally {
+        await f.dispose();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("enqueues a due relation review without awaiting it", async () => {
     const snapshot = {

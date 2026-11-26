@@ -1177,7 +1177,13 @@ export function createHookHandlers(deps: HookDeps) {
       }
       if (request?.retainedReplay) {
         const old = request.retainedReplay;
-        if (runId) turnAssociations.bindNativeRun(runId, request, old);
+        if (runId) {
+          const sessionKey = old.sessionKey ?? ctx.sessionKey?.trim();
+          turnAssociations.bindNativeRun(runId, request, {
+            ...old,
+            sessionKey,
+          });
+        }
         if (old.finalized) turnAssociations.markAssociationTerminal(old);
         return;
       }
