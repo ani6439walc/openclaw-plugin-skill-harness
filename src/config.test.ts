@@ -199,9 +199,7 @@ describe("resolveConfig", () => {
         thinking: "medium",
         timeoutSeconds: 300,
         triggers: {
-          relationHealthCheck: { enabled: true, everyTurns: 10 },
-          routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
-          capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
+          relationHealthCheck: { everyTurns: 10 },
         },
       });
 
@@ -809,8 +807,6 @@ describe("resolveConfig", () => {
           timeoutSeconds: 600,
           triggers: {
             relationHealthCheck: { everyTurns: 0 },
-            routingUncertainty: { enabled: false, confidenceBelow: 2 },
-            capabilityFit: { enabled: false, toolCalls: 0, toolFailures: 500 },
           },
         },
       });
@@ -822,14 +818,14 @@ describe("resolveConfig", () => {
         thinking: "high",
         timeoutSeconds: 600,
         triggers: {
-          relationHealthCheck: { enabled: true, everyTurns: 1 },
-          routingUncertainty: { enabled: false, confidenceBelow: 1 },
-          capabilityFit: { enabled: false, toolCalls: 1, toolFailures: 100 },
+          relationHealthCheck: { everyTurns: 1 },
         },
       });
     });
 
     it.each([
+      "routingUncertainty",
+      "capabilityFit",
       "experienceHealthCheck",
       "intentHealthCheck",
       "successfulPattern",
@@ -840,10 +836,18 @@ describe("resolveConfig", () => {
           review: {
             enabled: true,
             triggers: {
-              relationHealthCheck: { enabled: true, everyTurns: 3 },
+              relationHealthCheck: { everyTurns: 3 },
               [key]: {},
             },
           },
+        }),
+      ).toThrow();
+    });
+
+    it("rejects the retired relation health enable switch", () => {
+      expect(() =>
+        resolveConfig({
+          review: { triggers: { relationHealthCheck: { enabled: false } } },
         }),
       ).toThrow();
     });

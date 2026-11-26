@@ -78,9 +78,9 @@ When OpenClaw supplies a native request admission ID, prompt rebuilds for that r
 
 ### After a completed turn
 
-Review is disabled by default. When enabled, the relation-health cadence, uncertain routing, or capability-fit evidence can schedule a background investigation. A reviewer can complete the investigation with no finding.
+Review is disabled by default. When enabled, it schedules a background check of skill relations on every tenth qualifying turn in a session. A completed turn qualifies if Skill Harness recommended a skill or recorded a successful skill load. A turn with several skills counts once. Turns with neither leave the count unchanged. The reviewer starts with the skills from the turn that reached the interval and may find that the graph needs no change.
 
-The Review execution module loads only after Review is enabled and a trigger survives evaluation. After asynchronous loading and snapshot preparation, the plugin rechecks lifecycle cancellation, scheduler disposal, host hook validity, and the originating turn before queueing work. Pipeline events remain synchronous. QMD itself remains loaded on demand.
+The Review execution module loads only when Review is enabled and the turn reaches the configured interval. After asynchronous loading and snapshot preparation, the plugin rechecks lifecycle cancellation, scheduler disposal, host hook validity, and the originating turn before queueing work. Pipeline events remain synchronous. QMD itself remains loaded on demand.
 
 The reviewer can propose creating, updating, or deleting imported and Review-created relations. It works from bounded snapshots and must cite both endpoint skills. The parent checks the current identities, evidence and targeted revisions before publishing the graph changes and their operation history.
 
@@ -139,7 +139,7 @@ Managed skill searches keep `rerank: false`; query expansion continues to use `q
 
 This release retires experience retrieval, injection, maintenance and the `skill_experience` tool. Existing experience documents and their QMD index can stay in place. The new runtime does not create, read, modify or remove `dataRoot/experiences/` or `dataRoot/qmd/experiences/`.
 
-1. Prepare the build and its matching configuration together. Remove the entire `routing.experiences` block and any `review.triggers.experienceHealthCheck` or `review.triggers.intentHealthCheck` settings. The strict schema rejects the old keys. To carry forward an intentional cadence, set `review.triggers.relationHealthCheck` with `enabled` and `everyTurns`. Remove `skill_experience` from tool allowlists and prompts.
+1. Prepare the build and its matching configuration together. Remove the entire `routing.experiences` block and any `review.triggers.experienceHealthCheck` or `review.triggers.intentHealthCheck` settings. The strict schema rejects the old keys. To carry forward an intentional cadence, set `review.triggers.relationHealthCheck.everyTurns` and use `review.enabled` to control background runs. Remove `skill_experience` from tool allowlists and prompts.
 2. Stop the old generation and all Review writers before switching. Preserve the previous build and configuration. If an older `review.json` exists, move it to a private archive outside the active data root. The new writer starts a relation-only schema-v9 log and refuses to overwrite an unsupported existing file.
 3. Retain the skill-relation graph and its source registry, existing sessions and statistics, skill indexes, shared embedding cache, and archived experience data. The cutover does not require rebuilding the graph or clearing historical data. New routed turns record skill selections, and new counts use those selected skills.
 4. Start the matching build and configuration. Verify the three public tools, skill-only prompt output on an eligible request, and a relation Review receipt if Review is enabled. To roll back, stop the new generation, preserve its log separately, and restore the old build, configuration and compatible Review log together.
@@ -295,7 +295,9 @@ Merge this into the plugin configuration to enable background relation review.
 }
 ```
 
-Remove the example `model` line to use the session/agent model. Default triggers include a relation health check every 10 turns (`review.triggers.relationHealthCheck`), routing confidence below 0.5, and capability-fit thresholds of 5 tool calls or 2 failures, plus inventory evidence. Runs are debounced and serialized in the background; they do not change the route already used for a completed turn.
+Omit the example `model` to use the session or agent model. Set `review.triggers.relationHealthCheck.everyTurns` to change the interval (an integer from 1 to 1,000, default 10). For example, at the default interval a session with nine qualifying turns can have several turns without skills before the next recommendation or successful load makes the tenth. Runs are debounced and serialized in the background. Each session persists its count across restarts. On upgrade, the tracker initializes the count from identifiable, completed skill-bearing turns still present in that session. This does not replay past reviews. Background scheduling is best effort: a restart can discard a queued check, and reconstructing a missing reply from transcript history alone does not launch a reviewer.
+
+When upgrading from a multi-trigger build, remove `review.triggers.routingUncertainty`, `review.triggers.capabilityFit`, and `review.triggers.relationHealthCheck.enabled`. Both configuration validators reject these fields. To disable all background checks, set `review.enabled` to `false`; to use a custom interval, keep `everyTurns`. Existing schema-v9 Review receipts retain their original trigger labels.
 
 The reviewer can use `ls`, `read`, `skill_list`, `skill_search` and `skill_view`. Each run may incur model costs. Only the parent can publish a validated batch of graph operations.
 

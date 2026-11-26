@@ -1135,7 +1135,7 @@ function decisionAnalysis(dataRoot, stats, review, days, now) {
       "Rates are observations, not accuracy or causal effects.",
       "Name and QMD candidates overlap; never sum channel counts as a unique pool.",
       "Daily skillRouting/toolErrors attribution keys are encoded and may overflow into __other__; daily usage names are raw.",
-      "Review triggers overlap; outcome rates use completed events, not trigger counts.",
+      "Historical Review receipts can contain overlapping triggers; outcome rates use completed events.",
       "Repair index/data health before proposing threshold changes; low adoption alone does not justify deletion.",
     ],
   };

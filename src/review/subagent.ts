@@ -11,13 +11,12 @@ import type {
   ReviewDomainOutcome,
   RelationReviewAssessment,
 } from "./types.js";
-import type { ReviewTrigger } from "./triggers.js";
+import { REVIEW_TRIGGER } from "./triggers.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import { formatReviewSnapshot } from "./snapshot-formatter.js";
 export { formatReviewSnapshot } from "./snapshot-formatter.js";
 import {
   NO_FINDING_REASON_CODES,
-  normalizeNoFindingReasonCounts,
   type NoFindingReasonCode,
   type NoFindingReasonCounts,
   type ProcessedEventOutcome,
@@ -126,23 +125,13 @@ export interface ReviewSubagentResult {
 }
 
 export interface ReviewParseResult {
-  invalidRequestedPositiveFindings: number;
   relationReview?: RelationReviewAssessment;
   invalidRelationReview?: boolean;
   findings: ReviewFinding[];
-  missingRequestedTriggers: ReviewTrigger[];
+  missingDecision: boolean;
   noFindingReasonCounts?: NoFindingReasonCounts;
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
 }
-
-const REVIEW_INSTRUCTIONS: Record<ReviewTrigger, string> = {
-  "relation-health-check":
-    "Inspect existing edges and discover documented relationships among eligible skills.",
-  "routing-uncertainty":
-    "Use low-confidence routing as a clue to inspect missing or misleading relationships.",
-  "capability-fit":
-    "Use observed tool calls, failures and skill loads as clues for relationships to inspect. Verify every proposed edge against both skill documents.",
-};
 
 const NO_FINDING_REASON_CODE_LIST = NO_FINDING_REASON_CODES.join(", ");
 
@@ -335,7 +324,6 @@ function parseReviewResponse(raw: string): unknown | undefined {
 
 const NoFindingSchema = z
   .object({
-    trigger: z.string(),
     hasFinding: z.literal(false),
     reasonCode: z.enum(NO_FINDING_REASON_CODES).optional(),
   })
@@ -349,7 +337,6 @@ function normalizeSuggestedChange(value: unknown): unknown {
 }
 
 const BasePositiveFindingSchema = z.object({
-  trigger: z.string(),
   hasFinding: z.literal(true),
   dedupeKey: z.string().trim().min(1).max(120),
   summary: z.string().trim().min(1).max(500),
@@ -397,7 +384,7 @@ function classifySchemaRejection(
   if (!finding || typeof finding !== "object" || Array.isArray(finding)) {
     return "invalid-shape";
   }
-  if (!("trigger" in finding)) return "missing-trigger-decision";
+  if (!("hasFinding" in finding)) return "missing-required-field";
   if (finding.hasFinding === false) {
     if (
       "reasonCode" in finding &&
@@ -447,7 +434,7 @@ Read the relevant complete sections of both endpoint SKILL.md copies before prop
 You may create, update, or delete author-imported and Review-created relations. Content evidence alone is sufficient when it explicitly supports the type, direction and reason. At least one endpoint must be a seed. At most 8 relation findings are allowed, one per ordered endpoint pair.
 Types: related (documented relevance), composes_with (documented output/input or workflow composition), similar_to (overlapping capability), specializes (from is a narrower form of to), depends_on (from explicitly requires to), conflicts_with (incompatible requirements or effects). Types are advisory, not confidence levels or instructions to co-load. Mere co-recommendation, co-loading, similar names or high model scores are insufficient. Helpful composition does not prove a necessary dependency.
 Updates must explain the concrete problem in the old relation. Deletion requires evidence of contradiction, duplication or supersession; no supporting search hit, low usage or invisibility is insufficient. Preserve applicable qualifications in the reason. No evidence means no relation finding.
-For a relation positive finding use targetKind="skill-relation", operation="create"|"update"|"delete", fromSkillId, toSkillId, and relationEvidence. Create/update require relationType and a nonempty reason (max 2000 Unicode code points). Do not include source, confidence or verification fields. Keep the usual trigger, hasFinding, dedupeKey, summary, evidence, correctionGoal, suggestedChange; correctionGoal explains why this exact relationship should change.
+For a relation positive finding use targetKind="skill-relation", operation="create"|"update"|"delete", fromSkillId, toSkillId, and relationEvidence. Create/update require relationType and a nonempty reason (max 2000 Unicode code points). Do not include source, confidence or verification fields. Keep hasFinding, dedupeKey, summary, evidence, correctionGoal, suggestedChange; correctionGoal explains why this exact relationship should change.
 relationEvidence contains 2–16 exact excerpts covering BOTH endpoints: {skillId, filePath:"SKILL.md", startLine, endLine, quote}. Lines are 1-based and inclusive, at most 200 lines per excerpt; quote is the exact complete lines joined with newline, at most 2000 Unicode code points. Do not supply or guess hashes: the parent computes them from its original snapshots. No ellipses or paraphrases in quotes.
 Relation findings are proposals only. Only the parent may publish a validated batch to the graph.
 <relation_manifest>${formatRelationReviewContext(context)}</relation_manifest>`;
@@ -455,15 +442,10 @@ Relation findings are proposals only. Only the parent may publish a validated ba
 
 export function buildReviewPrompt(
   snapshot: ReviewSnapshot,
-  triggers: readonly ReviewTrigger[],
   relationContext: RelationReviewContext,
 ): string {
-  const noFindings = triggers.map((trigger) => ({
-    trigger,
-    hasFinding: false,
-  }));
   const example = {
-    findings: noFindings,
+    findings: [{ hasFinding: false }],
     relationReview: {
       existing: relationContext.relations.length
         ? "no-change"
@@ -471,25 +453,23 @@ export function buildReviewPrompt(
       discovery: "no-change",
     },
   };
-  return `You review skill relationships. Inspect each requested trigger using the skill evidence and the untrusted turn snapshot below.
-${triggers.map((trigger) => `${trigger}: ${REVIEW_INSTRUCTIONS[trigger]}`).join("\n")}
+  return `You review skill relationships. Inspect existing edges and discover documented relationships among eligible skills. Use the skill evidence and the untrusted turn snapshot below.
 
-${formatReviewSnapshot(snapshot, { requestedTriggers: triggers })}
+${formatReviewSnapshot(snapshot)}
 ${relationReviewInstructions(relationContext)}
 
 Return exactly one JSON object with findings and relationReview.
 ${ULTRA_CONCISE_REVIEW_OUTPUT_STYLE}
 
-For each requested trigger, supply one or more positive findings or one hasFinding=false decision. Negative decisions may include reasonCode (${NO_FINDING_REASON_CODE_LIST}). Positive findings require nonempty dedupeKey (at most 120 characters), summary (500), evidence (up to 10 nonempty strings of at most 1000 characters), correctionGoal (1000) and suggestedChange (12000), in addition to the relation fields above. Use only observed evidence.
+Supply one or more positive findings or one hasFinding=false decision. Negative decisions may include reasonCode (${NO_FINDING_REASON_CODE_LIST}). Positive findings require nonempty dedupeKey (at most 120 characters), summary (500), evidence (up to 10 nonempty strings of at most 1000 characters), correctionGoal (1000) and suggestedChange (12000), in addition to the relation fields above. Use only observed evidence.
 Illustrative update for an existing edge. Use actual admitted IDs and exact line excerpts.
-{"findings":[{"trigger":"${triggers[0] ?? "capability-fit"}","hasFinding":true,"targetKind":"skill-relation","operation":"update","fromSkillId":"github:example/catalog:source","toSkillId":"github:example/catalog:target","relationType":"composes_with","reason":"The documented output and input compose.","relationEvidence":[{"skillId":"github:example/catalog:source","filePath":"SKILL.md","startLine":4,"endLine":4,"quote":"Exact documented output"},{"skillId":"github:example/catalog:target","filePath":"SKILL.md","startLine":4,"endLine":4,"quote":"Exact documented input"}],"dedupeKey":"correct-relation-type","summary":"Correct the relation type","evidence":["Exact content of both staged endpoints"],"correctionGoal":"Replace the old broad relation with documented composition","suggestedChange":"Update the existing relationship"}],"relationReview":{"existing":"changes-proposed","discovery":"no-change"}}
+{"findings":[{"hasFinding":true,"targetKind":"skill-relation","operation":"update","fromSkillId":"github:example/catalog:source","toSkillId":"github:example/catalog:target","relationType":"composes_with","reason":"The documented output and input compose.","relationEvidence":[{"skillId":"github:example/catalog:source","filePath":"SKILL.md","startLine":4,"endLine":4,"quote":"Exact documented output"},{"skillId":"github:example/catalog:target","filePath":"SKILL.md","startLine":4,"endLine":4,"quote":"Exact documented input"}],"dedupeKey":"correct-relation-type","summary":"Correct the relation type","evidence":["Exact content of both staged endpoints"],"correctionGoal":"Replace the old broad relation with documented composition","suggestedChange":"Update the existing relationship"}],"relationReview":{"existing":"changes-proposed","discovery":"no-change"}}
 
 No-change example: ${JSON.stringify(example)}`;
 }
 
 export function parseReviewFindingsDetailed(
   raw: string,
-  requestedTriggers: readonly ReviewTrigger[],
   relationContext?: RelationReviewContext,
 ): ReviewParseResult | undefined {
   try {
@@ -498,15 +478,13 @@ export function parseReviewFindingsDetailed(
     const parsed = parsedResult.success
       ? parsedResult.data
       : ReviewResponseSchema.parse(extractMalformedFindingsResponse(raw));
-    const requested = new Set<string>(requestedTriggers);
     const findings: ReviewFinding[] = [];
-    const validDecisionTriggers = new Set<string>();
+    let hasDecision = false;
     const noFindingReasonCounts: Partial<Record<NoFindingReasonCode, number>> =
       {};
     const schemaRejectionReasonCounts: Partial<
       Record<SchemaRejectionReasonCode, number>
     > = {};
-    let invalidRequestedPositiveFindings = 0;
 
     for (const rawFinding of parsed.findings) {
       const rawRecord =
@@ -515,19 +493,11 @@ export function parseReviewFindingsDetailed(
         !Array.isArray(rawFinding)
           ? (rawFinding as Record<string, unknown>)
           : undefined;
-      const isRequestedPositiveFinding =
-        rawRecord?.hasFinding === true &&
-        typeof rawRecord.trigger === "string" &&
-        requested.has(rawRecord.trigger);
-
       const result = FindingSchema.safeParse(rawFinding);
       if (!result.success) {
         const reasonCode = classifySchemaRejection(rawRecord);
-        if (isRequestedPositiveFinding) {
-          invalidRequestedPositiveFindings += 1;
-          schemaRejectionReasonCounts[reasonCode] =
-            (schemaRejectionReasonCounts[reasonCode] ?? 0) + 1;
-        }
+        schemaRejectionReasonCounts[reasonCode] =
+          (schemaRejectionReasonCounts[reasonCode] ?? 0) + 1;
         logger.warn(
           `dropping invalid review finding ${JSON.stringify({
             schemaRejectionReasonCode: reasonCode,
@@ -536,26 +506,16 @@ export function parseReviewFindingsDetailed(
         );
         continue;
       }
-      const finding = result.data;
-      if (!finding.hasFinding) {
-        if (requested.has(finding.trigger)) {
-          validDecisionTriggers.add(finding.trigger);
-          if (finding.reasonCode) {
-            noFindingReasonCounts[finding.reasonCode] =
-              (noFindingReasonCounts[finding.reasonCode] ?? 0) + 1;
-          }
-        }
-        continue;
+      hasDecision = true;
+      if (result.data.hasFinding) {
+        const { hasFinding: _, ...change } = result.data;
+        findings.push({ ...change, trigger: REVIEW_TRIGGER });
+      } else if (result.data.reasonCode) {
+        const code = result.data.reasonCode;
+        noFindingReasonCounts[code] = (noFindingReasonCounts[code] ?? 0) + 1;
       }
-      if (!requested.has(finding.trigger)) continue;
-      validDecisionTriggers.add(finding.trigger);
-      const { hasFinding: _hasFinding, trigger, ...change } = finding;
-      findings.push({ ...change, trigger: trigger as ReviewTrigger });
     }
 
-    const normalizedReasonCounts = normalizeNoFindingReasonCounts(
-      noFindingReasonCounts,
-    );
     const normalizedSchemaRejectionCounts = Object.keys(
       schemaRejectionReasonCounts,
     ).length
@@ -591,16 +551,9 @@ export function parseReviewFindingsDetailed(
       ...(assessment.success ? { relationReview: assessment.data } : {}),
       ...(invalidRelationReview ? { invalidRelationReview: true } : {}),
       findings,
-      missingRequestedTriggers: [
-        ...new Set(
-          requestedTriggers.filter(
-            (trigger) => !validDecisionTriggers.has(trigger),
-          ),
-        ),
-      ],
-      invalidRequestedPositiveFindings,
-      ...(normalizedReasonCounts
-        ? { noFindingReasonCounts: normalizedReasonCounts }
+      missingDecision: !hasDecision,
+      ...(Object.keys(noFindingReasonCounts).length
+        ? { noFindingReasonCounts }
         : {}),
       ...(normalizedSchemaRejectionCounts
         ? { schemaRejectionReasonCounts: normalizedSchemaRejectionCounts }
@@ -653,7 +606,6 @@ type RunReviewParams = {
   messageProvider?: string;
   modelRef: { provider: string; model: string };
   snapshot: ReviewSnapshot;
-  triggers: readonly ReviewTrigger[];
   abortSignal?: AbortSignal;
 };
 
@@ -704,11 +656,7 @@ async function runReviewSubagentInternal(
     signal: abortSignal,
   });
   try {
-    const prompt = buildReviewPrompt(
-      params.snapshot,
-      params.triggers,
-      params.relationContext,
-    );
+    const prompt = buildReviewPrompt(params.snapshot, params.relationContext);
     await stageRelationReviewEvidence(
       params.relationContext,
       workspaceDir,
@@ -759,7 +707,6 @@ async function runReviewSubagentInternal(
     const rawReply = extractPayloadText(result);
     const parsed = parseReviewFindingsDetailed(
       rawReply,
-      params.triggers,
       params.relationContext,
     );
     if (parsed?.relationReview) metadata.relationReview = parsed.relationReview;
@@ -771,8 +718,8 @@ async function runReviewSubagentInternal(
     }
 
     if (
-      parsed.missingRequestedTriggers.length > 0 ||
-      parsed.invalidRequestedPositiveFindings ||
+      parsed.missingDecision ||
+      parsed.schemaRejectionReasonCounts ||
       parsed.invalidRelationReview ||
       (parsed.relationReview?.discovery === "no-change" &&
         reviewTools.searchCount === 0)
@@ -788,12 +735,7 @@ async function runReviewSubagentInternal(
                 1,
             }
           : {}),
-        ...(parsed.missingRequestedTriggers.length
-          ? {
-              "missing-trigger-decision":
-                parsed.missingRequestedTriggers.length,
-            }
-          : {}),
+        ...(parsed.missingDecision ? { "missing-trigger-decision": 1 } : {}),
       };
       return {
         findings: [],

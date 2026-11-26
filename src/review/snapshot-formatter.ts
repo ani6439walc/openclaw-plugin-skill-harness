@@ -1,5 +1,4 @@
 import { indentXmlLines } from "../xml-format.js";
-import type { ReviewTrigger } from "./triggers.js";
 import type { ReviewSnapshot } from "./types.js";
 
 function escapeSnapshotText(value: unknown): string {
@@ -245,9 +244,7 @@ function formatReviewState(
   addDefined(metadata, "turnNumber", options.turnNumber);
   addDefined(metadata, "startedAt", state.timestamps?.start);
   addDefined(metadata, "endedAt", state.timestamps?.end);
-  addDefined(metadata, "confidence", state.confidence);
   addDefined(metadata, "matchedSkills", state.matchedSkills);
-  addDefined(metadata, "capabilityFit", state.capabilityFit);
 
   const fields = [
     wrapOptionalReviewSnapshotBlock(
@@ -292,16 +289,8 @@ function formatReviewState(
   return wrapRequiredReviewSnapshotBlock("current_turn", content);
 }
 
-interface FormatReviewSnapshotOptions {
-  requestedTriggers?: readonly ReviewTrigger[];
-}
-
-function formatSnapshotManifest(
-  snapshot: ReviewSnapshot,
-  options: FormatReviewSnapshotOptions,
-): string {
+function formatSnapshotManifest(snapshot: ReviewSnapshot): string {
   const manifest: Record<string, unknown> = {
-    requestedTriggers: [...(options.requestedTriggers ?? [])],
     recentTurnCount: snapshot.recent.length,
     currentSkillsUsedCount: snapshot.current.skillsUsed?.length ?? 0,
     currentToolCallCount: snapshot.current.toolCalls?.length ?? 0,
@@ -312,10 +301,7 @@ function formatSnapshotManifest(
   );
 }
 
-export function formatReviewSnapshot(
-  snapshot: ReviewSnapshot,
-  options: FormatReviewSnapshotOptions = {},
-): string {
+export function formatReviewSnapshot(snapshot: ReviewSnapshot): string {
   const recent = wrapOptionalReviewSnapshotBlock(
     "recent_turns",
     snapshot.recent
@@ -325,7 +311,7 @@ export function formatReviewSnapshot(
       .join("\n"),
   );
   const blocks = [
-    formatSnapshotManifest(snapshot, options),
+    formatSnapshotManifest(snapshot),
     formatReviewState("current_turn", snapshot.current, {
       turnNumber: snapshot.turnNumber,
     }),

@@ -26,7 +26,7 @@ describe("IntentReviewLogWriter", () => {
   });
 
   const relationFinding: SkillRelationReviewFinding = {
-    trigger: "capability-fit",
+    trigger: "relation-health-check",
     targetKind: "skill-relation",
     operation: "create",
     fromSkillId: "collection:first",
@@ -239,7 +239,6 @@ describe("IntentReviewLogWriter", () => {
       reviewedSkillEpochs: { [key]: epoch },
     };
     fs.writeFileSync(file, JSON.stringify(log));
-    expect(writer.completedSkillEpochKeys()).toEqual(new Set([key]));
     const relationPreparation = {
       status: "skipped" as const,
       reason: "no-seeds" as const,
@@ -264,7 +263,6 @@ describe("IntentReviewLogWriter", () => {
     expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual(log);
     expect(
       await writer.record("skipped", source, [], {
-        triggers: ["relation-health-check"],
         outcome: "skipped",
         relationPreparation,
       }),

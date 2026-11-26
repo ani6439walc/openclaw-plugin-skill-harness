@@ -2,7 +2,6 @@ import { logger } from "../../api.js";
 import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import type { ReviewSnapshot } from "./types.js";
-import type { ReviewTrigger } from "./triggers.js";
 import type { PluginHookAgentContext } from "../hooks/types.js";
 import type { BackgroundRunner } from "../subagent-runtime.js";
 
@@ -17,7 +16,6 @@ export interface ReviewCandidate {
   resolvedConfig: ResolvedSkillHarnessPluginConfig;
   modelRef: { provider: string; model: string };
   snapshot: ReviewSnapshot;
-  triggers: readonly ReviewTrigger[];
 }
 
 export type ReviewRunner = (

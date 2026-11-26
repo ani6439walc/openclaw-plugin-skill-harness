@@ -118,9 +118,7 @@ const DEFAULT_REVIEW = {
   thinking: "medium",
   timeoutSeconds: 300,
   triggers: {
-    relationHealthCheck: { enabled: true, everyTurns: 10 },
-    routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
-    capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
+    relationHealthCheck: { everyTurns: 10 },
   },
 } as const;
 
@@ -475,7 +473,6 @@ function resolveSkillsConfig(raw: unknown): ResolvedSkillsConfig {
   return SkillsSchema.parse(skills === undefined ? {} : skills);
 }
 
-const enabledSchema = z.boolean().catch(true);
 const ReviewSchema = z
   .object({
     enabled: z.boolean().catch(false),
@@ -487,27 +484,11 @@ const ReviewSchema = z
       .object({
         relationHealthCheck: z
           .object({
-            enabled: enabledSchema,
             everyTurns: boundedInt(10, 1, 1_000),
           })
+          .strict()
           .optional()
           .default(DEFAULT_REVIEW.triggers.relationHealthCheck),
-        routingUncertainty: z
-          .object({
-            enabled: enabledSchema,
-            confidenceBelow: z
-              .number()
-              .catch(0.5)
-              .transform((value) => Math.max(0, Math.min(1, value))),
-          })
-          .catch(DEFAULT_REVIEW.triggers.routingUncertainty),
-        capabilityFit: z
-          .object({
-            enabled: enabledSchema,
-            toolCalls: boundedInt(5, 1, 100),
-            toolFailures: boundedInt(2, 1, 100),
-          })
-          .catch(DEFAULT_REVIEW.triggers.capabilityFit),
       })
       .strict()
       .optional()

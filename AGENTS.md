@@ -69,11 +69,11 @@ Direct skill discovery combines bounded typo-aware name matching (strip URLs bef
 
 Topic checkers (`previousTopic`), runtime task complexity scoring (`complexity`), classifier `suggestion` fields, session curation (`curation` / `curationAppliedCount`), instruction writers, legacy `routing.intents` configuration, legacy `routing.model`, `routing.modelFallback`, `routing.thinking`, routing subagent fallback, legacy `fastpath` / `candidate` frontmatter fields, and legacy pseudo-headers (`[Skill Harness Context...]`, `[User Message]:`) are obsolete and strictly forbidden. Do not use OpenClaw core's reserved `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>` delimiters in plugin prompt output as core runtime logic strips them from visible turns; these delimiters are sanitizer-only input boundaries.
 
-The managed skill index lives under `dataRoot/qmd/skills/`. Review defaults to disabled. When enabled, it uses `relation-health-check`, `routing-uncertainty` and `capability-fit`. Configure the periodic trigger with `review.triggers.relationHealthCheck` (enabled every 10 turns by default).
+The managed skill index lives under `dataRoot/qmd/skills/`. `review.enabled` controls automatic relation checks and defaults to false. `review.triggers.relationHealthCheck.everyTurns` is the only cadence setting (default 10). Count distinct completed turns per session with a final skill recommendation or successful load. A qualifying turn increments the count once even with multiple skills or repeated finalization. A turn without skills leaves the count unchanged.
 
 Fresh schema-v7 `stats.json` records skill, tool, routing, projection, inventory, and daily telemetry. Current top-level selections do not create intents; per-intent route-reason aggregates are populated only when historical `state.intent.result` exists. Older stats schemas are rejected fail-open without migration or rewrite. QMD scores use retrieval hit scores; classifier scores use classifier confidence. The runtime-health report exposes aggregate inventory counts without agent or skill names.
 
-Capability-fit uses tool-call/tool-failure thresholds or inventory-selected skill epochs. A failed call alone cannot establish verified recovery. See [Relation Review execution](#relation-review-execution) for scheduling and disposal. The `scripts/` CLIs are explicitly invoked maintenance resources; they must not recreate production routing or Review persistence.
+See [Relation Review execution](#relation-review-execution) for scheduling and disposal. The `scripts/` CLIs are explicitly invoked maintenance resources; they must not recreate production routing or Review persistence.
 
 Prompt injection follows a compact attribute layout to minimize prompt tokens:
 
@@ -126,7 +126,7 @@ Release a lifetime lease only after its store closes successfully. A retired sto
 
 Discovery freshness belongs in the managed index search entrypoints so hooks and tools share the same behavior. Reread skill agent mappings and visible names on subsequent searches. Missing or invalid published state must fail open without a known-stale fallback; a later publication must recover in the same instance. Explicitly open discovery stores with `readOnly: true`; do not build, embed, publish mappings, or collect. Snapshot identity and visible names per acquired search operation. Reuse existing build/catalog locks and lifetime leases without nested catalog acquisition or holding catalog locks across store opening/model requests; drain operations before closing stores. Disposal must await discovery refresh/acquisition and retirement work.
 
-Review schema rejection warnings expose issue paths, codes, counts and a coarse reason. Expand nested union issues to identify failing fields. Omit rejected values, raw replies and evidence text. A missing-trigger decision means a valid decision for the requested trigger did not survive validation.
+Review schema rejection warnings expose issue paths, codes, counts and a coarse reason. Expand nested union issues to identify failing fields. Omit rejected values, raw replies and evidence text. The historical diagnostic name `missing-trigger-decision` means no valid relation decision survived validation. The parent stamps the fixed relation-health trigger on accepted findings.
 
 ## Skill relation graph
 
@@ -135,8 +135,7 @@ and its own relations in the private graph. Preserve author reasons/provenance o
 import; subsequent Review revisions must preserve the original operations in
 history rather than treating their current reason/type as immutable. Relation
 inspection seeds are final `matchedSkills` union successfully loaded skills,
-filtered to current visible winning identities. Count adoption only on successful loads. Use existing Review
-triggers/scheduling, one-hop evidence preparation with at most eight extra visible
+filtered to current visible winning identities. Count adoption only on successful loads. Use the relation-health cadence, one-hop evidence preparation with at most eight extra visible
 skills, and at most eight ordered-pair changes per run.
 
 The parent stages confined full `SKILL.md` snapshots (256 KiB per file, 2 MiB
@@ -316,7 +315,7 @@ metadata before verifying the formal graph through the invoking agent's tools.
 
 ## Relation Review execution
 
-Require a valid finding or no-finding decision for every requested trigger. Positive findings have `targetKind: "skill-relation"` and a create, update or delete operation. Missing or malformed requested decisions reject the batch. For ready inspections require both existing and discovery assessments, consistent with the proposed operations. See [skill relation graph](#skill-relation-graph) for evidence admission, proposal validation and atomic publication.
+Require a valid finding or no-finding decision for the `relation-health-check` trigger. Positive findings have `targetKind: "skill-relation"` and a create, update or delete operation. Missing or malformed requested decisions reject the batch. For ready inspections require both existing and discovery assessments, consistent with the proposed operations. See [skill relation graph](#skill-relation-graph) for evidence admission, proposal validation and atomic publication.
 
 Run in a temporary workspace with detached persistence and workspace-only file reads. The reviewer tool allowlist is `ls`, `read`, `skill_list`, `skill_search` and `skill_view`.
 
@@ -407,8 +406,8 @@ A healthy report **does not prove Gateway loaded the plugin**. Review logs also 
 - Confidence is selector confidence, not retrieval similarity or calibrated accuracy. A nonempty pool with no injection does not identify selector failure versus an intentional rejection. Exact selector failure reasons, stage latency, model costs, and true precision/recall are unobserved.
 - Session selection requires a recorded matched-skill array. Usage comparisons require completed turns with usage records. Missing fields reduce coverage.
 - Daily usage names are raw; daily `skillRouting` and `toolErrors` keys are encoded and may overflow into `__other__`. Overflow makes per-skill injection/adoption comparison unavailable; aggregate rates remain usable. Do not subtract usage and injection totals from different populations.
-- A `missing-trigger-decision` rejection can follow a malformed positive finding even when its `trigger` field was present. New schema warnings expose issue paths/codes/counts without content; alternative union branches may contribute additional paths. Historical coarse reasons cannot recover the original invalid field, and detached Review transcripts are not retained.
-- Review triggers overlap. Calculate outcome rates over completed events. Count graph changes from committed findings in applied events. `changes.averagePerAppliedEvent` divides committed findings by `changes.appliedEvents`. An empty history establishes only that no completions were observed. A no-finding decision may be appropriate.
+- A `missing-trigger-decision` rejection can follow a malformed positive relation finding. New schema warnings expose issue paths/codes/counts without content; alternative union branches may contribute additional paths. Historical coarse reasons cannot recover the original invalid field, and detached Review transcripts are not retained.
+- Historical schema-v9 receipts can contain overlapping triggers. Current runs use only `relation-health-check`. Calculate outcome rates over completed events. Count graph changes from committed findings in applied events. `changes.averagePerAppliedEvent` divides committed findings by `changes.appliedEvents`. An empty history establishes only that no completions were observed. A no-finding decision may be appropriate.
 - Retained aggregates do not establish causality or record configuration changes. A previous-period difference is a prompt to investigate, not proof of an improvement or regression.
 
 ### Present the result and bounded next steps

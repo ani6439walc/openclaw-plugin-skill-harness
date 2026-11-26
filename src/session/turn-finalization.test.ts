@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileLock, sessionsPath } from "../file-utils.js";
-import { SessionTracker } from "./tracker.js";
+import { extractSkillInfo, SessionTracker } from "./tracker.js";
 
 describe("SessionTracker exact-turn finalization", () => {
   let root: string;
@@ -147,6 +147,11 @@ describe("SessionTracker exact-turn finalization", () => {
 
   it("builds Review evidence and event identity around the exact finalized turn", async () => {
     await prepare("run-a", "first");
+    await tracker.mergeTurnAndPersist({
+      sessionId: "session-a",
+      expectedTurnKey: "run-a",
+      data: { matchedSkills: ["alpha"] },
+    });
     await tracker.finalizeTurnFromAgentEnd({
       sessionId: "session-a",
       expectedTurnKey: "run-a",
@@ -163,6 +168,219 @@ describe("SessionTracker exact-turn finalization", () => {
     expect(snapshot?.recent).toEqual([]);
     expect(snapshot?.current.input).not.toBe("second");
   });
+
+  it("counts completed skill-bearing turns once in completion order across reloads", async () => {
+    // Older session files have neither count nor per-turn ordinals.
+    const file = sessionsPath("session-a.json", root);
+    const routed = (turnKey: string) => ({
+      turnKey,
+      matchedSkills: ["alpha"],
+      timestamps: { end: "2026-08-12T00:00:00.000Z" },
+    });
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        sessionId: "session-a",
+        history: [
+          ...Array.from({ length: 7 }, (_, i) => routed(`old-${i}`)),
+          { ...routed("empty"), matchedSkills: [] },
+          { ...routed("unfinished"), timestamps: {} },
+        ],
+        current: {
+          ...routed("legacy"),
+          matchedSkills: undefined,
+          intent: { intentMatchedSkills: ["old-format"] },
+        },
+      }),
+    );
+    await prepare("first", "first");
+    await tracker.mergeTurnAndPersist({
+      sessionId: "session-a",
+      expectedTurnKey: "first",
+      data: { matchedSkills: ["alpha"] },
+    });
+    await prepare("later", "later");
+    const finish = (run: string) => ({
+      sessionId: "session-a",
+      expectedTurnKey: run,
+      endedAt: "2026-08-12T00:00:04.000Z",
+    });
+    const skillRead = {
+      toolCallId: "load",
+      name: "read",
+      params: { path: "/skills/beta/SKILL.md" },
+      result: "---\nname: beta\n---\nSkill instructions",
+      success: true,
+    };
+    await tracker.finalizeTurnFromAgentEnd({
+      ...finish("later"),
+      stagedToolFallbacks: [skillRead],
+    });
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", "later")?.turnNumber,
+    ).toBe(9);
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", "first"),
+    ).toBeUndefined();
+
+    // Reload from disk after the newer prompt has already finished.
+    tracker = SessionTracker.create(root);
+    await tracker.finalizeTurnFromAgentEnd({
+      ...finish("first"),
+      stagedToolFallbacks: [skillRead], // both a recommendation and a load
+    });
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", "first")?.turnNumber,
+    ).toBe(10);
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", "later")?.turnNumber,
+    ).toBe(9);
+    expect(await tracker.finalizeTurnFromAgentEnd(finish("first"))).toBe(
+      "already-finalized",
+    );
+
+    await prepare("no-skills", "ordinary turn");
+    await tracker.finalizeTurnFromAgentEnd({
+      ...finish("no-skills"),
+      stagedToolFallbacks: [
+        { ...skillRead, success: false, error: "read failed" },
+      ],
+    });
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", "no-skills"),
+    ).toBeUndefined();
+    expect(JSON.parse(fs.readFileSync(file, "utf8")).skillTurnCount).toBe(10);
+  });
+
+  it("counts an unambiguous recovered completion and lets only its exact terminal callback admit it", async () => {
+    await prepare("recovered", "unique");
+    await tracker.mergeTurnAndPersist({
+      sessionId: "session-a",
+      expectedTurnKey: "recovered",
+      data: { matchedSkills: ["alpha"] },
+    });
+    await prepare("repeat-1", "same");
+    await prepare("repeat-2", "same");
+    await prepare("ambiguous-reply", "repeated transcript input");
+    const recentTurns = [
+      { role: "user", text: "same" },
+      { role: "assistant", text: "ambiguous" },
+      { role: "user", text: "repeated transcript input" },
+      { role: "assistant", text: "old" },
+      { role: "user", text: "repeated transcript input" },
+      { role: "assistant", text: "new" },
+      { role: "user", text: "unique" },
+      { role: "assistant", text: "verified" },
+    ];
+    const next = {
+      sessionId: "session-a",
+      agentId: "main",
+      runId: "current",
+      input: "next",
+      startedAt: "2026-08-12T00:00:04.000Z",
+      recentTurns,
+    };
+    await tracker.preparePromptTurn(next);
+    await tracker.preparePromptTurn(next);
+    tracker = SessionTracker.create(root);
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", "recovered")?.turnNumber,
+    ).toBe(1);
+    for (const id of ["repeat-1", "repeat-2", "ambiguous-reply"]) {
+      expect(
+        tracker.getTurnState("session-a", id)?.timestamps?.end,
+      ).toBeUndefined();
+    }
+    const terminal = {
+      sessionId: "session-a",
+      expectedTurnKey: "recovered",
+      result: "verified",
+      endedAt: "2026-08-12T00:00:03.000Z",
+    };
+    expect(
+      await tracker.finalizeTurnFromAgentEnd({
+        ...terminal,
+        result: "wrong result",
+      }),
+    ).toBe("stale");
+    expect(await tracker.finalizeTurnFromAgentEnd(terminal)).toBe(
+      "became-review-eligible",
+    );
+    expect(await tracker.finalizeTurnFromAgentEnd(terminal)).toBe(
+      "already-finalized",
+    );
+    expect(
+      tracker.getReviewSnapshotForTurn("session-a", "recovered")?.turnNumber,
+    ).toBe(1);
+  });
+
+  it.each([false, true])(
+    "counts a staged full skill_view result once (already finalized: %s)",
+    async (alreadyFinalized) => {
+      await prepare("late-load", "manual");
+      const finish = {
+        sessionId: "session-a",
+        expectedTurnKey: "late-load",
+        endedAt: "2026-08-12T00:00:04.000Z",
+      };
+      if (alreadyFinalized) await tracker.finalizeTurnFromAgentEnd(finish);
+      expect(
+        tracker.getReviewSnapshotForTurn("session-a", "late-load"),
+      ).toBeUndefined();
+      const skill = { name: "alpha", path: "/skills/alpha/SKILL.md" };
+      const params = { name: "alpha" };
+      const fullResult = JSON.stringify({
+        ...skill,
+        success: true,
+        content: "# Operating instructions\n".repeat(50),
+      });
+      const preview = fullResult.slice(0, 200);
+      expect(extractSkillInfo("skill_view", params, preview)).toBeUndefined();
+      const valid = {
+        toolCallId: "load",
+        name: "skill_view",
+        params,
+        result: preview,
+        success: true,
+        skillUsed: extractSkillInfo("skill_view", params, fullResult),
+      };
+      const neverLoaded = { name: "other", path: "/skills/other/SKILL.md" };
+      const fallback = {
+        ...finish,
+        stagedToolFallbacks: [
+          valid,
+          { ...valid, skillUsed: neverLoaded },
+          {
+            ...valid,
+            toolCallId: "failed",
+            success: false,
+            skillUsed: neverLoaded,
+          },
+          {
+            ...valid,
+            toolCallId: "error",
+            error: "failure",
+            skillUsed: neverLoaded,
+          },
+        ],
+      };
+      expect(await tracker.finalizeTurnFromAgentEnd(fallback)).toBe(
+        alreadyFinalized ? "became-review-eligible" : "applied",
+      );
+      expect(await tracker.finalizeTurnFromAgentEnd(fallback)).toBe(
+        "already-finalized",
+      );
+      expect(
+        tracker.getReviewSnapshotForTurn("session-a", "late-load")?.turnNumber,
+      ).toBe(1);
+      const current = tracker.getTurnState("session-a", "late-load")!;
+      expect(current.skillsUsed).toEqual([skill]);
+      expect(current.toolCalls).toHaveLength(3);
+      for (const call of current.toolCalls!)
+        expect(call).not.toHaveProperty("skillUsed");
+    },
+  );
 
   it("fails closed for missing, duplicate, and already-terminal ordinary merges", async () => {
     await prepare("run-a", "first");

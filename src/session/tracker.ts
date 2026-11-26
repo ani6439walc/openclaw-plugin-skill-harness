@@ -34,6 +34,8 @@ export interface SkillRecord {
 }
 
 export interface ToolResultFallback {
+  /** Extracted from the complete tool result before its stored preview is truncated. */
+  skillUsed?: SkillRecord;
   toolCallId: string;
   name: string;
   params: Record<string, unknown>;
@@ -100,6 +102,8 @@ export interface IntentState {
 }
 
 export interface SessionState {
+  skillTurnNumber?: number;
+  reviewAwaitingFinalization?: true;
   turnKey?: string;
   input?: string;
   matchedSkills?: string[];
@@ -125,6 +129,7 @@ export interface SessionState {
 }
 
 export interface SessionData {
+  skillTurnCount?: number;
   sessionId: string;
   sessionKey?: string;
   agentId?: string;
@@ -234,26 +239,43 @@ function sanitizeToolParamsForReview(
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
-function hasReviewEvidence(state: SessionState): boolean {
-  return (
-    state.matchedSkills !== undefined ||
-    Boolean(state.intent?.result) ||
-    Boolean(state.skillsUsed?.length)
-  );
+// Allocate once under the session file lock. Completion order can differ from
+// prompt order when overlapping runs finish or a staged tool result lands late.
+function recordSkillTurn(session: SessionData, turn: SessionState): boolean {
+  if (turn.skillTurnNumber !== undefined || !turn.timestamps?.end) return false;
+  const recommended = turn.matchedSkills ?? turn.intent?.intentMatchedSkills;
+  const hasRecommendation =
+    Array.isArray(recommended) &&
+    recommended.some((name) => typeof name === "string" && name.trim());
+  const hasLoad =
+    Array.isArray(turn.skillsUsed) &&
+    turn.skillsUsed.some(
+      (skill) => typeof skill?.name === "string" && skill.name.trim(),
+    );
+  if (!hasRecommendation && !hasLoad) return false;
+  session.skillTurnCount = (session.skillTurnCount ?? 0) + 1;
+  turn.skillTurnNumber = session.skillTurnCount;
+  return true;
+}
+
+function initializeSkillTurnCount(session: SessionData): void {
+  if (session.skillTurnCount !== undefined) return;
+  session.skillTurnCount = 0;
+  const seen = new Set<string>();
+  for (const turn of [...(session.history ?? []), session.current]) {
+    const id = resolveTurnEventId(session.sessionId, turn);
+    if (id && !seen.has(id) && recordSkillTurn(session, turn)) seen.add(id);
+  }
 }
 
 function createReviewState(
   state: SessionState,
-  options?: {
-    preserveFullResult?: boolean;
-    includeRecommendationCandidates?: boolean;
-  },
+  options?: { preserveFullResult?: boolean },
 ): ReviewState {
   const matchedSkills =
     state.matchedSkills ?? state.intent?.intentMatchedSkills;
   return {
     input: sanitizeReviewInput(state.input),
-    confidence: state.confidence ?? state.intent?.result?.confidence,
     matchedSkills: matchedSkills ? [...matchedSkills] : undefined,
     skillsUsed: state.skillsUsed?.map((skill) => ({ ...skill })),
     toolCalls: state.toolCalls?.map((call) => ({
@@ -451,30 +473,38 @@ function mergeUniqueSkills(
 
 function appendToolCalls(
   current: SessionState,
-  toolCalls: NonNullable<SessionState["toolCalls"]>,
-): void {
+  toolCalls: readonly (NonNullable<SessionState["toolCalls"]>[number] & {
+    skillUsed?: SkillRecord;
+  })[],
+): boolean {
   if (toolCalls.length === 0) {
     current.toolCalls = [];
-    return;
+    return false;
   }
 
-  const existing = current.toolCalls || [];
-  const existingIds = new Set(
+  const existing = current.toolCalls ?? [];
+  const seen = new Set(
     existing.flatMap((call) => (call.toolCallId ? [call.toolCallId] : [])),
   );
-  const additions = toolCalls.filter(
-    (call) => !call.toolCallId || !existingIds.has(call.toolCallId),
-  );
-  current.toolCalls = [...existing, ...additions];
-  const skillsFromToolCalls = additions.map((toolCall) =>
-    toolCall.success === false || toolCall.error !== undefined
-      ? undefined
-      : extractSkillInfo(toolCall.name, toolCall.params, toolCall.result),
-  );
-  const skillsUsed = mergeUniqueSkills(current.skillsUsed, skillsFromToolCalls);
-  if (skillsUsed) {
-    current.skillsUsed = skillsUsed;
+  const additions: NonNullable<SessionState["toolCalls"]> = [];
+  const loads: SkillRecord[] = [];
+  for (const { skillUsed, ...call } of toolCalls) {
+    if (call.toolCallId) {
+      if (seen.has(call.toolCallId)) continue;
+      seen.add(call.toolCallId);
+    }
+    additions.push(call);
+    if (call.success === false || call.error !== undefined) continue;
+    const skill =
+      (call.success === true ? skillUsed : undefined) ??
+      extractSkillInfo(call.name, call.params, call.result);
+    if (skill) loads.push(skill);
   }
+  if (!additions.length) return false;
+  current.toolCalls = [...existing, ...additions];
+  if (loads.length)
+    current.skillsUsed = mergeUniqueSkills(current.skillsUsed, loads);
+  return true;
 }
 
 function mergeSessionState(
@@ -602,6 +632,7 @@ export class SessionTracker {
               sessionId: params.sessionId,
               current: { intent: {} },
             } satisfies SessionData);
+        initializeSkillTurnCount(draft);
         const mutation = params.mutate(draft);
         if (mutation.changed) writeJsonAtomic(filePath, draft);
         this.sessionData.set(params.sessionId, draft);
@@ -634,35 +665,41 @@ export class SessionTracker {
           mutate: (session) => {
             params.assertActive?.();
             const current = session.current;
+            let recovered = false;
             if (params.recentTurns?.length) {
-              const pairs: Array<{ user: string; assistant?: string }> = [];
+              // Text is the only available association here. A repeated prompt in
+              // either history cannot identify which exact turn the reply closed.
+              const answers = new Map<string, string | undefined>();
               for (let i = 0; i < params.recentTurns.length; i++) {
                 const turn = params.recentTurns[i];
-                if (turn.role === "user") {
-                  const next = params.recentTurns[i + 1];
-                  const assistant =
-                    next?.role === "assistant" ? next.text : undefined;
-                  pairs.push({
-                    user: turn.text.trim(),
-                    assistant: assistant?.trim(),
-                  });
+                if (turn.role !== "user") continue;
+                const input = turn.text.trim();
+                const next = params.recentTurns[i + 1];
+                answers.set(
+                  input,
+                  !answers.has(input) && next?.role === "assistant"
+                    ? next.text.trim()
+                    : undefined,
+                );
+              }
+              const states = new Map<string, SessionState | undefined>();
+              for (const state of [...(session.history ?? []), current]) {
+                const input = state.input?.trim();
+                if (input && answers.get(input)) {
+                  states.set(input, states.has(input) ? undefined : state);
                 }
               }
-              const history = session.history ?? [];
-              for (const state of [...history, current]) {
-                if (!state.result && state.input) {
-                  const matched = pairs.find(
-                    (p) =>
-                      p.user === state.input?.trim() && Boolean(p.assistant),
-                  );
-                  if (matched?.assistant) {
-                    state.result = matched.assistant;
-                    if (!state.timestamps?.end) {
-                      state.timestamps = {
-                        ...(state.timestamps ?? {}),
-                        end: params.startedAt,
-                      };
-                    }
+              for (const [input, state] of states) {
+                if (!state || state.result) continue;
+                state.result = answers.get(input)!;
+                recovered = true;
+                if (!state.timestamps?.end) {
+                  state.timestamps = {
+                    ...state.timestamps,
+                    end: params.startedAt,
+                  };
+                  if (recordSkillTurn(session, state)) {
+                    state.reviewAwaitingFinalization = true;
                   }
                 }
               }
@@ -683,7 +720,7 @@ export class SessionTracker {
                   status: "reused" as const,
                   identity: { turnKey: current.turnKey!, reused: true },
                 },
-                changed: false,
+                changed: recovered,
               };
             }
 
@@ -773,10 +810,16 @@ export class SessionTracker {
     error?: string;
     endedAt: string;
     maxWaitMs?: number;
-  }): Promise<"applied" | "already-finalized" | "stale" | "retryable-failure"> {
+  }): Promise<
+    | "applied"
+    | "became-review-eligible"
+    | "already-finalized"
+    | "stale"
+    | "retryable-failure"
+  > {
     try {
       const outcome = await this.mutateSession<
-        "applied" | "already-finalized" | "stale"
+        "applied" | "became-review-eligible" | "already-finalized" | "stale"
       >({
         sessionId: params.sessionId,
         maxWaitMs: params.maxWaitMs,
@@ -800,7 +843,14 @@ export class SessionTracker {
             if (resultConflict || errorConflict) {
               return { result: "stale" as const, changed: false };
             }
-            let updated = false;
+          }
+          const fallbacks = params.stagedToolFallbacks;
+          const addedToolCalls = Boolean(
+            fallbacks?.length &&
+            appendToolCalls(target, structuredClone(fallbacks)),
+          );
+          if (target.timestamps?.end) {
+            let updated = addedToolCalls;
             if (!target.result && params.result) {
               target.result = params.result;
               updated = true;
@@ -809,24 +859,15 @@ export class SessionTracker {
               target.error = params.error;
               updated = true;
             }
-            const missingFallbackIds = new Set<string>();
-            const missingFallbacks = (params.stagedToolFallbacks ?? []).filter(
-              (fallback) => {
-                if (
-                  missingFallbackIds.has(fallback.toolCallId) ||
-                  target.toolCalls?.some(
-                    (call) => call.toolCallId === fallback.toolCallId,
-                  )
-                ) {
-                  return false;
-                }
-                missingFallbackIds.add(fallback.toolCallId);
-                return true;
-              },
-            );
-            if (missingFallbacks.length > 0) {
-              appendToolCalls(target, structuredClone(missingFallbacks));
-              updated = true;
+            if (
+              recordSkillTurn(session, target) ||
+              target.reviewAwaitingFinalization
+            ) {
+              delete target.reviewAwaitingFinalization;
+              return {
+                result: "became-review-eligible" as const,
+                changed: true,
+              };
             }
             return {
               result: "already-finalized" as const,
@@ -834,30 +875,13 @@ export class SessionTracker {
             };
           }
 
-          const missingFallbackIds = new Set<string>();
-          const missingFallbacks = (params.stagedToolFallbacks ?? []).filter(
-            (fallback) => {
-              if (
-                missingFallbackIds.has(fallback.toolCallId) ||
-                target.toolCalls?.some(
-                  (call) => call.toolCallId === fallback.toolCallId,
-                )
-              ) {
-                return false;
-              }
-              missingFallbackIds.add(fallback.toolCallId);
-              return true;
-            },
-          );
-          if (missingFallbacks.length > 0) {
-            appendToolCalls(target, structuredClone(missingFallbacks));
-          }
           if (params.result !== undefined) target.result = params.result;
           if (params.error !== undefined) target.error = params.error;
           target.timestamps = {
             ...(target.timestamps ?? {}),
             end: params.endedAt,
           };
+          recordSkillTurn(session, target);
           return { result: "applied" as const, changed: true };
         },
       });
@@ -918,36 +942,13 @@ export class SessionTracker {
     }
   }
 
-  getReviewSnapshot(sessionId: string): ReviewSnapshot | undefined {
-    const session = this.sessionData.get(sessionId);
-    const start = session?.current.timestamps?.start;
-    if (!session || !start || !hasReviewEvidence(session.current)) return;
-
-    const completedStates = [
-      ...(session.history ?? []),
-      session.current,
-    ].filter(hasReviewEvidence);
-    return {
-      sessionId,
-      sessionKey: session.sessionKey,
-      agentId: session.agentId,
-      eventId: `${sessionId}:${start}`,
-      turnNumber: completedStates.length,
-      current: createReviewState(session.current, {
-        includeRecommendationCandidates: true,
-      }),
-      recent: completedStates
-        .slice(-10, -1)
-        .map((state) => createReviewState(state, { preserveFullResult: true })),
-    };
-  }
-
   getReviewSnapshotForTurn(
     sessionId: string,
     turnKey: string,
   ): ReviewSnapshot | undefined {
     const session = this.sessionData.get(sessionId);
     if (!session) return;
+    initializeSkillTurnCount(session);
     const ordered = [...(session.history ?? []), session.current];
     const matches = ordered
       .map((state, index) => ({ state, index }))
@@ -955,10 +956,9 @@ export class SessionTracker {
     if (matches.length !== 1) return;
     const { state: target, index: targetIndex } = matches[0];
     const eventId = resolveTurnEventId(sessionId, target);
-    if (!target.timestamps?.end || !eventId || !hasReviewEvidence(target))
-      return;
-    const throughTarget = ordered
-      .slice(0, targetIndex + 1)
+    if (!target.timestamps?.end || !eventId || !target.skillTurnNumber) return;
+    const previous = ordered
+      .slice(0, targetIndex)
       .filter(
         (state) =>
           state.input ||
@@ -971,12 +971,10 @@ export class SessionTracker {
       sessionKey: session.sessionKey,
       agentId: session.agentId,
       eventId,
-      turnNumber: throughTarget.length,
-      current: createReviewState(target, {
-        includeRecommendationCandidates: true,
-      }),
-      recent: throughTarget
-        .slice(-10, -1)
+      turnNumber: target.skillTurnNumber,
+      current: createReviewState(target),
+      recent: previous
+        .slice(-9)
         .map((state) => createReviewState(state, { preserveFullResult: true })),
     };
   }

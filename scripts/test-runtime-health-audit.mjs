@@ -21,7 +21,7 @@ const REVIEW_SOURCE = {
 const NO_FINDING_EVENT = {
   processedAt: REVIEW_SOURCE.turnStart,
   source: REVIEW_SOURCE,
-  triggers: ["capability-fit"],
+  triggers: ["relation-health-check"],
   changeCount: 0,
   outcome: "nofinding",
 };
@@ -243,7 +243,7 @@ const FIXTURE = {
         relationBatchId: "batch-1",
         changes: [
           {
-            trigger: "capability-fit",
+            trigger: "relation-health-check",
             targetKind: "skill-relation",
             operation: "update",
             fromSkillId: "first",
@@ -268,7 +268,6 @@ const FIXTURE = {
       "event-2": {
         ...NO_FINDING_EVENT,
         processedAt: "2026-08-01T00:01:00.000Z",
-        triggers: ["routing-uncertainty"],
         noFindingReasonCounts: {
           "already-covered": 1,
         },
@@ -380,7 +379,7 @@ test("reports health without private runtime text and writes private atomic outp
     total: 1,
     averagePerAppliedEvent: 1,
     eventsByChangeCount: { 0: 1, 1: 1 },
-    byTrigger: { "capability-fit": 1 },
+    byTrigger: { "relation-health-check": 1 },
     byOperation: { update: 1 },
   });
   assert.equal(r.runtime.sessions.sessionFiles, 1);
@@ -652,7 +651,7 @@ test("missing logs remain unavailable and source hash changes reject reports", (
   assert.deepEqual(empty.runtime.stats, { status: "unavailable" });
   assert.equal(empty.analysis.cumulative.statsStatus, "unavailable");
 });
-test("review multi-trigger outcomes count committed changes only", () => {
+test("historical multi-trigger review outcomes count committed changes only", () => {
   update("review.json", (r) => {
     r.processedEvents = Object.fromEntries(
       [

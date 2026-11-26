@@ -1273,19 +1273,6 @@ description: Navigate Tokyo.
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
     };
     vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
-    vi.spyOn(defaultTracker, "getReviewSnapshot").mockReturnValue({
-      sessionId: "tracked-session",
-      agentId: "agent-a",
-      eventId: "tracked-session:2026-07-06T15:47:27.004Z",
-      turnNumber: 1,
-      current: {
-        timestamps: {
-          start: "2026-07-06T15:47:27.004Z",
-          end: "2026-07-06T15:48:27.004Z",
-        },
-      },
-      recent: [],
-    });
     vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
     vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
     const recordStats = vi
@@ -1299,7 +1286,6 @@ description: Navigate Tokyo.
         skillInventoryResolver: resolver,
         reviewLogWriter: {
           inspectionOffsetsForEvent: () => () => 0,
-          completedSkillEpochKeys: () => new Set<string>(),
           record: vi.fn(),
         },
       },
@@ -1470,8 +1456,8 @@ description: Navigate Tokyo.
     const state = {
       turnKey: "run-1",
       input: "fixture request",
-      matchedSkills: [],
-      confidence: scenario === "no-trigger" ? 1 : 0.2,
+      matchedSkills: ["fixture-skill"],
+      confidence: 0.2,
       timestamps: {
         start: "2026-10-18T00:00:00.000Z",
         end: "2026-10-18T00:00:01.000Z",
@@ -1481,7 +1467,7 @@ description: Navigate Tokyo.
       sessionId: "session-1",
       agentId: "main",
       eventId: "fixture-turn-event",
-      turnNumber: 1,
+      turnNumber: scenario === "no-trigger" ? 9 : 10,
       current: state,
       recent: [],
     };
@@ -1566,8 +1552,8 @@ description: Navigate Tokyo.
   });
 
   it.each([1, 2])(
-    "evaluates a manual skill load for Review with dynamic routing disabled (threshold %i)",
-    async (toolCalls) => {
+    "evaluates a manual skill load for Review with dynamic routing disabled (cadence %i)",
+    async (everyTurns) => {
       const root = fs.mkdtempSync(
         path.join(os.tmpdir(), "manual-skill-review-"),
       );
@@ -1591,7 +1577,7 @@ description: Navigate Tokyo.
               review: {
                 enabled: true,
                 model: "fixture/review",
-                triggers: { capabilityFit: { toolCalls } },
+                triggers: { relationHealthCheck: { everyTurns } },
               },
             }),
           dataRoot: root,
@@ -1641,16 +1627,13 @@ description: Navigate Tokyo.
         expect(state.matchedSkills).toBeUndefined();
         expect(statsAggregator.isRecordable(ctx.sessionId, state)).toBe(false);
         expect(statsAggregator.listProcessedEventIds().size).toBe(0);
-        if (toolCalls === 1) {
+        if (everyTurns === 1) {
           expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
           expect(reviewScheduler.schedule.mock.calls[0][0]).toMatchObject({
-            triggers: ["capability-fit"],
             snapshot: {
+              turnNumber: 1,
               current: {
-                capabilityFit: {
-                  source: "tool-call-threshold",
-                  observedSkillNames: ["manual"],
-                },
+                skillsUsed: [expect.objectContaining({ name: "manual" })],
               },
             },
           });
@@ -1664,7 +1647,7 @@ description: Navigate Tokyo.
     },
   );
 
-  it("enqueues enabled multi-trigger review without awaiting it", async () => {
+  it("enqueues a due relation review without awaiting it", async () => {
     const snapshot = {
       sessionId: "session-1",
       agentId: "main",
@@ -1718,7 +1701,6 @@ description: Navigate Tokyo.
     });
     const reviewLogWriter = {
       inspectionOffsetsForEvent: () => () => 0,
-      completedSkillEpochKeys: vi.fn().mockReturnValue(undefined),
       record: vi.fn(),
     };
     const turnAssociations = seedAssociation("session-1", "run-1");
@@ -1761,11 +1743,6 @@ description: Navigate Tokyo.
       expect.objectContaining({ sessionId: "session-1" }),
       [],
       {
-        triggers: [
-          "relation-health-check",
-          "routing-uncertainty",
-          "capability-fit",
-        ],
         outcome: "skipped",
         relationSearchCount: 0,
         relationPreparation: {

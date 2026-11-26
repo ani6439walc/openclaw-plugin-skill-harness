@@ -1,24 +1,9 @@
 import type { ReviewTrigger } from "./triggers.js";
 import type { RelationType } from "../skills/relation-graph.js";
 
-export interface ReviewRecommendationCandidate {
-  name: string;
-  provenance?: string;
-}
-
-export type CapabilityFitEvidence = {
-  source: "tool-call-threshold" | "tool-failure-threshold";
-  observedSkillNames: string[];
-  turnHasToolErrors: boolean;
-  recoveryVerified: boolean;
-};
-
 export type ReviewState = {
   input?: string;
-  confidence?: number;
   matchedSkills?: string[];
-  capabilityFit?: CapabilityFitEvidence;
-  recommendationCandidates?: ReviewRecommendationCandidate[];
   skillsUsed?: Array<{
     name: string;
     description?: string;

@@ -16,34 +16,26 @@ const snapshot: ReviewSnapshot = {
 
 describe("formatReviewSnapshot", () => {
   it("renders the current turn and selected skills", () => {
-    const output = formatReviewSnapshot(snapshot, {
-      requestedTriggers: ["routing-uncertainty"],
-    });
+    const output = formatReviewSnapshot(snapshot);
 
     expect(output).toContain('"matchedSkills":["git-tools"]');
     expect(output).not.toContain("<available_skills>");
     expect(output).toContain("<current_turn>");
   });
 
-  it("renders manifest with trigger and turn counts", () => {
-    const output = formatReviewSnapshot(snapshot, {
-      requestedTriggers: ["relation-health-check"],
-    });
+  it("renders manifest with turn counts", () => {
+    const output = formatReviewSnapshot(snapshot);
 
-    expect(output).toContain('"requestedTriggers":["relation-health-check"]');
     expect(output).toContain('"recentTurnCount":0');
     expect(output).toContain('"currentToolCallCount":1');
     expect(output).not.toContain("availableSkillCount");
   });
 
   it("escapes user-controlled snapshot text", () => {
-    const output = formatReviewSnapshot(
-      {
-        ...snapshot,
-        current: { ...snapshot.current, input: "<unsafe & value>" },
-      },
-      { requestedTriggers: ["relation-health-check"] },
-    );
+    const output = formatReviewSnapshot({
+      ...snapshot,
+      current: { ...snapshot.current, input: "<unsafe & value>" },
+    });
 
     expect(output).toContain("&lt;unsafe &amp; value&gt;");
   });
