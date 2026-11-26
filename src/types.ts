@@ -8,13 +8,7 @@ export type ResolvedReviewConfig = {
   thinking: ThinkLevel;
   timeoutSeconds: number;
   triggers: {
-    relationHealthCheck: { enabled: boolean; everyTurns: number };
-    routingUncertainty: { enabled: boolean; confidenceBelow: number };
-    capabilityFit: {
-      enabled: boolean;
-      toolCalls: number;
-      toolFailures: number;
-    };
+    relationHealthCheck: { everyTurns: number };
   };
 };
 

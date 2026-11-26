@@ -23,29 +23,11 @@ import {
   MAX_RELATION_INSPECTION_CURSORS,
 } from "./log.js";
 import type { RelationPreparationSummary } from "./relations.js";
-import type { ReviewTrigger } from "./triggers.js";
+import { REVIEW_TRIGGER } from "./triggers.js";
 import { safeErrorClassification } from "../error-diagnostics.js";
 
 export class IntentReviewLogWriter {
   constructor(private readonly dataRoot: string) {}
-
-  completedSkillEpochKeys(): ReadonlySet<string> | undefined {
-    const logPath = reviewLogPath(this.dataRoot);
-    if (!fileExists(logPath)) return new Set();
-    try {
-      return new Set(
-        Object.keys(
-          parseReviewLog(readJsonFile<unknown>(logPath)).reviewedSkillEpochs,
-        ),
-      );
-    } catch (error) {
-      const diagnostic = safeErrorClassification(error);
-      logger.warn(
-        `failed to read completed skill epochs reason=${diagnostic.reason}${diagnostic.code ? ` code=${diagnostic.code}` : ""}`,
-      );
-      return undefined;
-    }
-  }
 
   /** A missing log starts a new inspection. Existing history must admit this event. */
   inspectionOffsetsForEvent(
@@ -73,7 +55,6 @@ export class IntentReviewLogWriter {
     findings: readonly ReviewFinding[],
     options: {
       nowMs?: number;
-      triggers?: readonly ReviewTrigger[];
       outcome?: ProcessedEventOutcome;
       changedRelationCount?: number;
       relationBatchId?: string;
@@ -106,11 +87,7 @@ export class IntentReviewLogWriter {
         log.processedEvents[eventId] = {
           processedAt: nowIso,
           source,
-          triggers: [
-            ...new Set(
-              options.triggers ?? findings.map((finding) => finding.trigger),
-            ),
-          ],
+          triggers: [REVIEW_TRIGGER],
           changeCount: changes.length,
           outcome,
           ...(changes.length > 0 ? { changes } : {}),

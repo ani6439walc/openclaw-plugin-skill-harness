@@ -152,8 +152,7 @@ export type HookDeps = {
   reviewLogWriter?: Pick<
     IntentReviewLogWriter,
     "record" | "inspectionOffsetsForEvent"
-  > &
-    Partial<Pick<IntentReviewLogWriter, "completedSkillEpochKeys">>;
+  >;
   getWorkingSetSkills?: (agentId: string) => string[] | Promise<string[]>;
 
   bundledSkillsDir?: string;

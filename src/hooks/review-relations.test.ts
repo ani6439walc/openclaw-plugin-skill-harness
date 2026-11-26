@@ -86,7 +86,6 @@ async function setup(
     resolvedConfig: resolveConfig({}),
     ctx: {},
     modelRef: { provider: "test", model: "test" },
-    triggers: ["capability-fit"],
     snapshot: {
       sessionId: "s",
       eventId: "e",

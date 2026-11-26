@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 export interface TurnAssociation {
+  readonly finalized?: true;
   sessionId: string;
   sessionKey?: string;
   turnKey: string;

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseReviewLog } from "./log.js";
 
 const relationChange = {
-  trigger: "capability-fit",
+  trigger: "relation-health-check",
   targetKind: "skill-relation",
   operation: "create",
   fromSkillId: "source:one/skill-one",
@@ -43,7 +43,7 @@ function relationLog(
     processedEvents: {
       event: {
         processedAt: "2026-06-11",
-        triggers: ["capability-fit"],
+        triggers: ["relation-health-check"],
         changeCount: 1,
         outcome: "applied",
         changes: [change],
@@ -58,6 +58,16 @@ function relationLog(
 }
 
 describe("relation review audit", () => {
+  it("preserves historical v9 triggers and no-finding reason counts", () => {
+    const raw = relationLog(
+      { ...relationChange, trigger: "capability-fit" },
+      {
+        triggers: ["routing-uncertainty", "capability-fit"],
+        noFindingReasonCounts: { "routine-tool-use": 1 },
+      },
+    );
+    expect(parseReviewLog(raw)).toEqual(raw);
+  });
   it("rejects impossible inspection counts and unbounded cursors", () => {
     const preparation = {
       status: "ready",

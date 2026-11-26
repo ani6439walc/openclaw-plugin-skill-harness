@@ -504,7 +504,7 @@
       },
       "review": {
         "type": "object",
-        "description": "Optional asynchronous post-turn Review. It evaluates turns and reviews skill relations but never participates in the current route decision.",
+        "description": "Optional asynchronous post-turn Review of skill relations.",
         "additionalProperties": false,
         "properties": {
           "enabled": {
@@ -549,53 +549,12 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "enabled": {
-                    "type": "boolean",
-                    "default": true
-                  },
                   "everyTurns": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 1000,
-                    "default": 10
-                  }
-                }
-              },
-              "routingUncertainty": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "enabled": {
-                    "type": "boolean",
-                    "default": true
-                  },
-                  "confidenceBelow": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1,
-                    "default": 0.5
-                  }
-                }
-              },
-              "capabilityFit": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "enabled": {
-                    "type": "boolean",
-                    "default": true
-                  },
-                  "toolCalls": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 100,
-                    "default": 5
-                  },
-                  "toolFailures": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 100,
-                    "default": 2
+                    "default": 10,
+                    "description": "Check relations every N completed turns with a recommended or successfully loaded skill, counted per session."
                   }
                 }
               }

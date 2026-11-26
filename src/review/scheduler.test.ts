@@ -28,7 +28,6 @@ function createMockCandidate(
     resolvedConfig: {} as any,
     modelRef: { provider: "mock", model: "model-1" },
     snapshot,
-    triggers: ["relation-health-check"],
     ...overrides,
   };
 }

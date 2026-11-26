@@ -104,7 +104,7 @@ async function fixture(
         payloads: [
           {
             text: JSON.stringify({
-              findings: [{ trigger: "capability-fit", hasFinding: false }],
+              findings: [{ hasFinding: false }],
               relationReview: {
                 existing: "not-applicable",
                 discovery: "no-change",
@@ -158,7 +158,6 @@ async function fixture(
             },
             findings: [
               {
-                trigger: "capability-fit",
                 hasFinding: true,
                 targetKind: "skill-relation",
                 operation: "create",
@@ -216,7 +215,6 @@ async function fixture(
       current: { matchedSkills: ["a"] },
       recent: [],
     },
-    triggers: ["capability-fit"],
     relationContext: context,
     abortSignal: abort.signal,
   });

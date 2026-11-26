@@ -72,7 +72,7 @@ function finding(
 ): SkillRelationReviewFinding {
   const [a, b] = context!.skills;
   return {
-    trigger: "capability-fit",
+    trigger: "relation-health-check",
     targetKind: "skill-relation",
     operation: "create",
     fromSkillId: a.identity.id,

@@ -18,9 +18,9 @@ import {
 import { defaultTracker, extractSkillInfo } from "../session/index.js";
 import { defaultStatsAggregator } from "../stats/index.js";
 import { IntentReviewLogWriter } from "../review/log-writer.js";
-import { checkReviewTriggers, type ReviewTrigger } from "../review/triggers.js";
+import { isRelationReviewDue } from "../review/triggers.js";
 import type { getReviewModelRef } from "../review/subagent.js";
-import type { CapabilityFitEvidence, ReviewSnapshot } from "../review/types.js";
+import type { ReviewSnapshot } from "../review/types.js";
 import { createIntentReviewScheduler } from "../review/scheduler.js";
 import { createBackgroundRunner } from "../subagent-runtime.js";
 import { createHash } from "node:crypto";
@@ -335,7 +335,6 @@ export function createHookHandlers(deps: HookDeps) {
     };
     if (!relationContext) {
       await reviewLogWriter.record(candidate.snapshot.eventId, source, [], {
-        triggers: candidate.triggers,
         outcome: "skipped",
         relationPreparation,
         relationSearchCount: 0,
@@ -352,7 +351,6 @@ export function createHookHandlers(deps: HookDeps) {
       messageProvider: candidate.ctx.messageProvider,
       modelRef: candidate.modelRef,
       snapshot: candidate.snapshot,
-      triggers: candidate.triggers,
       abortSignal,
     });
     if (
@@ -365,7 +363,6 @@ export function createHookHandlers(deps: HookDeps) {
       source,
       reviewResult.findings,
       {
-        triggers: candidate.triggers,
         outcome: reviewResult.outcome,
         ...(reviewResult.changedRelationCount !== undefined
           ? { changedRelationCount: reviewResult.changedRelationCount }
@@ -437,6 +434,10 @@ export function createHookHandlers(deps: HookDeps) {
     const runId = params.ctx.runId?.trim();
     const request = params.routing.request;
     if (request?.admissionId !== undefined) {
+      const hostSessionKey =
+        params.routing.resolvedSessionKey ||
+        params.ctx.sessionKey?.trim() ||
+        undefined;
       const assertActive = () => {
         promptExecutions.assertRequestCurrent(request);
         params.ctx.hookInvocation?.assertActive();
@@ -447,22 +448,24 @@ export function createHookHandlers(deps: HookDeps) {
           assertActive();
           const prepared = await tracker.preparePromptTurn({
             sessionId,
-            sessionKey:
-              params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+            sessionKey: hostSessionKey,
             agentId: params.routing.effectiveAgentId,
             forceNew: true,
+            nativeAdmissionId: request.admissionId,
             input: params.latestUserMessage,
             startedAt: new Date().toISOString(),
             recentTurns: params.recentTurns,
             assertActive,
           });
           assertActive();
-          if (prepared.status === "retryable-failure") return;
+          if (!("identity" in prepared)) return;
           return {
             sessionId,
-            sessionKey:
-              params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+            sessionKey: prepared.identity.sessionKey ?? hostSessionKey,
             turnKey: prepared.identity.turnKey,
+            ...(prepared.identity.finalized
+              ? { finalized: true as const }
+              : {}),
           };
         },
       );
@@ -475,6 +478,13 @@ export function createHookHandlers(deps: HookDeps) {
         const reservation = turnAssociations.reserveAnonymous();
         if (reservation.status === "reserved")
           turnAssociations.bindAnonymous(reservation.token, association);
+      }
+      if (association.finalized) {
+        request.association = association;
+        promptExecutions.finalizeAssociation(association);
+        turnAssociations.markAssociationTerminal(association);
+        toolFallbacks.markAssociationTerminal(association);
+        return;
       }
       return association;
     }
@@ -551,7 +561,7 @@ export function createHookHandlers(deps: HookDeps) {
       if (params.routing.request)
         promptExecutions.assertRequestCurrent(params.routing.request);
       params.ctx.hookInvocation?.assertActive();
-      if (prepared.status === "retryable-failure") {
+      if (!("identity" in prepared)) {
         if (reservation.status === "reserved") {
           turnAssociations.release(reservation.token);
         }
@@ -1147,13 +1157,17 @@ export function createHookHandlers(deps: HookDeps) {
             ).latestUserMessage.trim()
           : undefined;
       request = ownerSessionId
-        ? promptExecutions.claimRequest({
-            agentId: resolveStatusUpdateAgentId(ctx),
-            sessionId: ownerSessionId,
-            admissionId,
-            runId,
-            legacyInput,
-          })
+        ? promptExecutions.claimRequest(
+            {
+              agentId: resolveStatusUpdateAgentId(ctx),
+              sessionId: ownerSessionId,
+              admissionId,
+              runId,
+              legacyInput,
+            },
+            (agentId, sessionId, id) =>
+              tracker.getNativeTurnIdentity?.(sessionId, agentId, id),
+          )
         : undefined;
       if (admissionId !== undefined && ctx.runId) {
         // This is an event-rejection fence, not a turn reservation or admission.
@@ -1162,6 +1176,18 @@ export function createHookHandlers(deps: HookDeps) {
           request ?? {},
           ownerSessionId,
         );
+      }
+      if (request?.retainedReplay) {
+        const old = request.retainedReplay;
+        if (runId) {
+          const sessionKey = old.sessionKey ?? ctx.sessionKey?.trim();
+          turnAssociations.bindNativeRun(runId, request, {
+            ...old,
+            sessionKey,
+          });
+        }
+        if (old.finalized) turnAssociations.markAssociationTerminal(old);
+        return;
       }
       const assertRequestActive = (allowFinalized = false) => {
         ctx.hookInvocation?.assertActive();
@@ -1228,10 +1254,8 @@ export function createHookHandlers(deps: HookDeps) {
         refreshedConfig,
       );
       ctx.hookInvocation?.assertActive();
-      if (
-        latestUserMessage.trim().length <
-        refreshedConfig.routing.minTriggerChars
-      ) {
+      const requestLength = latestUserMessage.trim().length;
+      if (requestLength === 0) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       routing.association = await prepareTrackingTurn({
@@ -1240,7 +1264,7 @@ export function createHookHandlers(deps: HookDeps) {
         latestUserMessage,
         recentTurns: extractRecentTurns(event.messages),
       });
-      assertRequestActive();
+      assertRequestActive(true);
       if (!routing.association) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
@@ -1255,7 +1279,10 @@ export function createHookHandlers(deps: HookDeps) {
       if (request) request.association = routing.association;
       promptExecutions.observe(routing.association);
 
-      if (refreshedConfig.routing.skills.maxInjectedSkills === 0) {
+      if (
+        requestLength < refreshedConfig.routing.minTriggerChars ||
+        refreshedConfig.routing.skills.maxInjectedSkills === 0
+      ) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
@@ -1808,26 +1835,12 @@ export function createHookHandlers(deps: HookDeps) {
     }
   }
 
-  async function buildReviewSnapshot(
-    baseSnapshot: NonNullable<ReturnType<typeof tracker.getReviewSnapshot>>,
-    capabilityFit?: CapabilityFitEvidence,
-  ) {
-    return {
-      ...baseSnapshot,
-      current: {
-        ...baseSnapshot.current,
-        ...(capabilityFit ? { capabilityFit } : {}),
-      },
-    };
-  }
-
   function enqueueReviewRun(params: {
     ctx: PluginHookAgentContext;
     resolvedConfig: ResolvedSkillHarnessPluginConfig;
     agentId: string;
     modelRef: NonNullable<ReturnType<typeof getReviewModelRef>>;
-    snapshot: Awaited<ReturnType<typeof buildReviewSnapshot>>;
-    triggers: readonly ReviewTrigger[];
+    snapshot: ReviewSnapshot;
   }): boolean {
     try {
       return reviewScheduler.schedule({
@@ -1837,53 +1850,12 @@ export function createHookHandlers(deps: HookDeps) {
         resolvedConfig: params.resolvedConfig,
         modelRef: params.modelRef,
         snapshot: params.snapshot,
-        triggers: params.triggers,
       });
     } catch (error) {
       logger.warn(
         formatErrorDiagnostic("failed to enqueue Intent Review", error),
       );
       return false;
-    }
-  }
-
-  function resolveCapabilityFitEvidence(params: {
-    snapshot: NonNullable<ReturnType<typeof tracker.getReviewSnapshot>>;
-    config: ResolvedSkillHarnessPluginConfig;
-  }): CapabilityFitEvidence | undefined {
-    const observedSkillNames = [
-      ...new Set(
-        (params.snapshot.current.skillsUsed ?? []).map((skill) =>
-          skill.name.trim().toLowerCase(),
-        ),
-      ),
-    ];
-
-    const toolCalls = params.snapshot.current.toolCalls ?? [];
-    const toolFailureCount = toolCalls.filter(
-      (call) => call.error !== undefined,
-    ).length;
-    if (
-      toolFailureCount >=
-      params.config.review.triggers.capabilityFit.toolFailures
-    ) {
-      return {
-        source: "tool-failure-threshold",
-        observedSkillNames,
-        turnHasToolErrors: true,
-        // The tracker has no tool-call-to-recovery association; do not infer it.
-        recoveryVerified: false,
-      };
-    }
-    if (
-      toolCalls.length >= params.config.review.triggers.capabilityFit.toolCalls
-    ) {
-      return {
-        source: "tool-call-threshold",
-        observedSkillNames,
-        turnHasToolErrors: false,
-        recoveryVerified: false,
-      };
     }
   }
 
@@ -1900,19 +1872,19 @@ export function createHookHandlers(deps: HookDeps) {
     const reviewConfig = resolvedConfig.review;
     if (!reviewConfig.enabled) return;
 
-    const baseSnapshot = tracker.getReviewSnapshotForTurn(
+    const snapshot = tracker.getReviewSnapshotForTurn(
       association.sessionId,
       association.turnKey,
     );
-    if (!baseSnapshot) return;
-    const triggers: ReviewTrigger[] = checkReviewTriggers(
-      baseSnapshot.current,
-      baseSnapshot.turnNumber,
-      reviewConfig.triggers,
-    );
+    if (
+      !snapshot ||
+      !isRelationReviewDue(
+        snapshot.turnNumber,
+        reviewConfig.triggers.relationHealthCheck.everyTurns,
+      )
+    )
+      return;
     try {
-      if (triggers.length === 0) return;
-
       const isReviewPreparationActive = () => {
         if (api.lifecycle?.signal?.aborted || reviewScheduler.isDisposed?.())
           return false;
@@ -1925,33 +1897,25 @@ export function createHookHandlers(deps: HookDeps) {
           tracker.getReviewSnapshotForTurn(
             association.sessionId,
             association.turnKey,
-          )?.eventId === baseSnapshot.eventId
+          )?.eventId === snapshot.eventId
         );
       };
       if (!isReviewPreparationActive()) return;
       const { getReviewModelRef } = await loadReviewSubagent();
       if (!isReviewPreparationActive()) return;
 
-      const agentId = ctx.agentId ?? baseSnapshot.agentId ?? "main";
+      const agentId = ctx.agentId ?? snapshot.agentId ?? "main";
       const modelRef = getReviewModelRef(api, agentId, resolvedConfig, {
         modelProviderId: ctx.modelProviderId,
         modelId: ctx.modelId,
       });
       if (!modelRef) return;
-      const capabilityFit = resolveCapabilityFitEvidence({
-        snapshot: baseSnapshot,
-        config: resolvedConfig,
-      });
-      const snapshot = await buildReviewSnapshot(baseSnapshot, capabilityFit);
-      if (!isReviewPreparationActive()) return;
-
       enqueueReviewRun({
         ctx,
         resolvedConfig,
         agentId,
         modelRef,
         snapshot,
-        triggers,
       });
     } catch (error) {
       logger.warn(
@@ -1996,7 +1960,8 @@ export function createHookHandlers(deps: HookDeps) {
     try {
       const stagedEntries = toolFallbacks.listForAssociation(association);
       const stagedToolFallbacks = stagedEntries.map(
-        ([, staged]) => staged.fallback,
+        ([, { fallback, skillUsed }]) =>
+          skillUsed ? { ...fallback, skillUsed } : fallback,
       );
       const payload = extractAgentEndPayload({
         messages: event.messages,
@@ -2010,7 +1975,11 @@ export function createHookHandlers(deps: HookDeps) {
         error: payload.error,
         endedAt: new Date().toISOString(),
       });
-      if (finalized !== "applied" && finalized !== "already-finalized") {
+      if (
+        finalized !== "applied" &&
+        finalized !== "already-finalized" &&
+        finalized !== "became-review-eligible"
+      ) {
         outcome = "skipped";
         return;
       }
@@ -2116,7 +2085,8 @@ export function createHookHandlers(deps: HookDeps) {
     if (!association) return;
     const stagedEntries = toolFallbacks.listForAssociation(association);
     const stagedToolFallbacks = stagedEntries.map(
-      ([, staged]) => staged.fallback,
+      ([, { fallback, skillUsed }]) =>
+        skillUsed ? { ...fallback, skillUsed } : fallback,
     );
     const messageContent = (event as { content?: unknown })?.content;
     const resultText =
@@ -2137,7 +2107,11 @@ export function createHookHandlers(deps: HookDeps) {
         finalizationStatus: finalized,
       })}`,
     );
-    if (finalized === "applied" || finalized === "already-finalized") {
+    if (
+      finalized === "applied" ||
+      finalized === "already-finalized" ||
+      finalized === "became-review-eligible"
+    ) {
       promptExecutions.finalizeAssociation(association);
       turnAssociations.markAssociationTerminal(association);
       toolFallbacks.markAssociationTerminal(association);
@@ -2146,7 +2120,7 @@ export function createHookHandlers(deps: HookDeps) {
         pendingToolCalls.delete(toolCallId);
         recordedToolCalls.add(toolCallId);
       }
-      if (finalized === "applied") {
+      if (finalized !== "already-finalized") {
         await finalizeTrackedTurn(association, ctx);
       } else {
         await recordAgentEndStats(association);

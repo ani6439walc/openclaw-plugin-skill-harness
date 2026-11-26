@@ -6,7 +6,7 @@ import type {
   ReviewSource,
   SkillRelationReviewFinding,
 } from "./types.js";
-import { REVIEW_TRIGGER_TYPES, type ReviewTrigger } from "./triggers.js";
+import { REVIEW_TRIGGER } from "./triggers.js";
 import { PROCESSED_EVENTS_RETENTION_DAYS } from "../constants.js";
 import { SKILL_SOURCE_ORDER, type SkillSource } from "../skills/types.js";
 import { relationTypes } from "../skills/relation-graph.js";
@@ -24,16 +24,22 @@ export const PROCESSED_EVENT_OUTCOMES = [
 export type ProcessedEventOutcome = (typeof PROCESSED_EVENT_OUTCOMES)[number];
 
 export const NO_FINDING_REASON_CODES = [
-  "routine-tool-use",
-  "outside-intent-scope",
   "insufficient-evidence",
-  "wrong-trigger",
   "already-covered",
   "privacy-sensitive",
 ] as const;
 export type NoFindingReasonCode = (typeof NO_FINDING_REASON_CODES)[number];
 export type NoFindingReasonCounts = Partial<
   Record<NoFindingReasonCode, number>
+>;
+const STORED_NO_FINDING_REASON_CODES = [
+  ...NO_FINDING_REASON_CODES,
+  "routine-tool-use",
+  "outside-intent-scope",
+  "wrong-trigger",
+] as const;
+type StoredNoFindingReasonCounts = Partial<
+  Record<(typeof STORED_NO_FINDING_REASON_CODES)[number], number>
 >;
 
 export const SCHEMA_REJECTION_REASON_CODES = [
@@ -52,18 +58,29 @@ export type SchemaRejectionReasonCounts = Partial<
   Record<SchemaRejectionReasonCode, number>
 >;
 
+// Historical schema-v9 receipts keep their original trigger on reads and rewrites.
+const StoredTriggerSchema = z.enum([
+  REVIEW_TRIGGER,
+  "routing-uncertainty",
+  "capability-fit",
+]);
+type StoredTrigger = z.infer<typeof StoredTriggerSchema>;
+type StoredRelationChange = Omit<SkillRelationReviewFinding, "trigger"> & {
+  trigger: StoredTrigger;
+};
+
 export type ProcessedEventRecord = {
   processedAt: string;
   source?: ReviewSource;
-  triggers: ReviewTrigger[];
+  triggers: StoredTrigger[];
   changeCount: number;
   outcome: ProcessedEventOutcome;
-  changes?: SkillRelationReviewFinding[];
+  changes?: StoredRelationChange[];
   changedRelationCount?: number;
   relationBatchId?: string;
   relationOutcome?: ReviewDomainOutcome;
   validationErrors?: string[];
-  noFindingReasonCounts?: NoFindingReasonCounts;
+  noFindingReasonCounts?: StoredNoFindingReasonCounts;
   schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
   relationPreparation?: RelationPreparationSummary;
   relationReview?: RelationReviewAssessment;
@@ -162,29 +179,10 @@ function hasOnlyKeys(
   const allowed = new Set(keys);
   return Object.keys(value).every((key) => allowed.has(key));
 }
-function normalizedCounts<T extends string>(
-  value: unknown,
-  allowed: readonly T[],
-): Partial<Record<T, number>> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return;
-  const result: Partial<Record<T, number>> = {};
-  for (const key of allowed) {
-    const count = (value as Record<string, unknown>)[key];
-    if (typeof count === "number" && Number.isInteger(count) && count > 0)
-      result[key] = count;
-  }
-  return Object.keys(result).length > 0 ? result : undefined;
-}
-export function normalizeNoFindingReasonCounts(
-  value: unknown,
-): NoFindingReasonCounts | undefined {
-  return normalizedCounts(value, NO_FINDING_REASON_CODES);
-}
-
 const PositiveCountsSchema = z.record(z.string(), z.number().int().positive());
 const NoFindingReasonCountsSchema = PositiveCountsSchema.refine((value) =>
-  hasOnlyKeys(value, NO_FINDING_REASON_CODES),
-).transform((value): NoFindingReasonCounts => value);
+  hasOnlyKeys(value, STORED_NO_FINDING_REASON_CODES),
+).transform((value): StoredNoFindingReasonCounts => value);
 const SchemaRejectionReasonCountsSchema = PositiveCountsSchema.refine((value) =>
   hasOnlyKeys(value, SCHEMA_REJECTION_REASON_CODES),
 ).transform((value): SchemaRejectionReasonCounts => value);
@@ -270,7 +268,7 @@ export const RelationChangeFieldsSchema = z
 
 export const StoredRelationChangeSchema = RelationChangeFieldsSchema.safeExtend(
   {
-    trigger: z.enum(REVIEW_TRIGGER_TYPES),
+    trigger: StoredTriggerSchema,
     dedupeKey: z.string().trim().min(1).max(120),
     summary: z.string().trim().min(1).max(500),
     evidence: z.array(z.string().trim().min(1).max(1000)).max(10),
@@ -283,7 +281,7 @@ const ProcessedEventRecordSchema = z
   .object({
     processedAt: z.string(),
     source: ReviewSourceSchema.optional(),
-    triggers: z.array(z.enum(REVIEW_TRIGGER_TYPES)),
+    triggers: z.array(StoredTriggerSchema),
     changeCount: z.number().int().nonnegative(),
     outcome: ProcessedEventOutcomeSchema,
     changes: z.array(StoredRelationChangeSchema).optional(),

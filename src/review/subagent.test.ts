@@ -23,12 +23,6 @@ const snapshot: ReviewSnapshot = {
   current: {
     input: "Run the tests and fix any failures",
     matchedSkills: ["test-driven-development"],
-    capabilityFit: {
-      source: "tool-call-threshold",
-      observedSkillNames: ["test-driven-development"],
-      turnHasToolErrors: false,
-      recoveryVerified: false,
-    },
     skillsUsed: [
       {
         name: "test-driven-development",
@@ -99,7 +93,6 @@ describe("host Review diagnostic strings", () => {
       } satisfies RelationReviewContext,
       modelRef: { provider: "PRIVATE-PROVIDER", model: "PRIVATE-MODEL" },
       snapshot,
-      triggers: ["capability-fit"],
     });
   }
 

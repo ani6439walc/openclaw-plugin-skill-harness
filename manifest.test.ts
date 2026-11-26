@@ -101,7 +101,7 @@ describe("skill-harness manifest", () => {
     expect(manifest.configSchema.properties).not.toHaveProperty("curation");
   });
 
-  it("exposes disabled-by-default three-trigger Review settings", () => {
+  it("exposes only the skill-bearing turn cadence for optional Review", () => {
     const review = manifest.configSchema.properties.review;
     const triggers = review.properties.triggers.properties;
     expect(manifest.configSchema.properties).not.toHaveProperty("evolution");
@@ -122,27 +122,18 @@ describe("skill-harness manifest", () => {
       default: 300,
     });
     expect(review.properties).not.toHaveProperty("keywordCoverage");
-    expect(triggers.relationHealthCheck.properties.everyTurns.default).toBe(10);
-    expect(triggers.routingUncertainty.properties.confidenceBelow.default).toBe(
-      0.5,
-    );
-    expect(triggers.capabilityFit.properties.toolCalls.default).toBe(5);
-    expect(triggers.capabilityFit.properties.toolFailures.default).toBe(2);
-    for (const removed of [
-      "experienceHealthCheck",
-      "intentHealthCheck",
-      "skillCandidate",
-      "skillPlacement",
-      "processGap",
-      "successfulPattern",
-      "satisfactionCheck",
-      "missingIntent",
-      "weakIntent",
-      "behaviorFix",
-      "entityContext",
-    ]) {
-      expect(triggers).not.toHaveProperty(removed);
-    }
+    expect(review.properties.triggers.additionalProperties).toBe(false);
+    expect(Object.keys(triggers)).toEqual(["relationHealthCheck"]);
+    expect(triggers.relationHealthCheck.additionalProperties).toBe(false);
+    expect(Object.keys(triggers.relationHealthCheck.properties)).toEqual([
+      "everyTurns",
+    ]);
+    expect(triggers.relationHealthCheck.properties.everyTurns).toMatchObject({
+      type: "integer",
+      minimum: 1,
+      maximum: 1000,
+      default: 10,
+    });
   });
 
   it("does not expose removed instruction writer or lowEffortRoutingMode settings", () => {

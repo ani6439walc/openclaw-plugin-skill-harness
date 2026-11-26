@@ -1273,19 +1273,6 @@ description: Navigate Tokyo.
       timestamps: { start: "2026-07-06T15:47:27.004Z" },
     };
     vi.spyOn(defaultTracker, "getAgentId").mockReturnValue("agent-a");
-    vi.spyOn(defaultTracker, "getReviewSnapshot").mockReturnValue({
-      sessionId: "tracked-session",
-      agentId: "agent-a",
-      eventId: "tracked-session:2026-07-06T15:47:27.004Z",
-      turnNumber: 1,
-      current: {
-        timestamps: {
-          start: "2026-07-06T15:47:27.004Z",
-          end: "2026-07-06T15:48:27.004Z",
-        },
-      },
-      recent: [],
-    });
     vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
     vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(true);
     const recordStats = vi
@@ -1299,7 +1286,6 @@ description: Navigate Tokyo.
         skillInventoryResolver: resolver,
         reviewLogWriter: {
           inspectionOffsetsForEvent: () => () => 0,
-          completedSkillEpochKeys: () => new Set<string>(),
           record: vi.fn(),
         },
       },
@@ -1470,8 +1456,8 @@ description: Navigate Tokyo.
     const state = {
       turnKey: "run-1",
       input: "fixture request",
-      matchedSkills: [],
-      confidence: scenario === "no-trigger" ? 1 : 0.2,
+      matchedSkills: ["fixture-skill"],
+      confidence: 0.2,
       timestamps: {
         start: "2026-10-18T00:00:00.000Z",
         end: "2026-10-18T00:00:01.000Z",
@@ -1481,7 +1467,7 @@ description: Navigate Tokyo.
       sessionId: "session-1",
       agentId: "main",
       eventId: "fixture-turn-event",
-      turnNumber: 1,
+      turnNumber: scenario === "no-trigger" ? 9 : 10,
       current: state,
       recent: [],
     };
@@ -1565,9 +1551,14 @@ description: Navigate Tokyo.
     }
   });
 
-  it.each([1, 2])(
-    "evaluates a manual skill load for Review with dynamic routing disabled (threshold %i)",
-    async (toolCalls) => {
+  it.each([
+    { everyTurns: 1, prompt: "Run the manual workflow", limit: 0, load: true },
+    { everyTurns: 2, prompt: "Run the manual workflow", limit: 0, load: true },
+    { everyTurns: 1, prompt: "繼續", limit: 5, load: true },
+    { everyTurns: 1, prompt: "繼續", limit: 5, load: false },
+  ])(
+    "tracks eligibility when dynamic routing skips ($prompt, load=$load, cadence=$everyTurns)",
+    async ({ everyTurns, prompt, limit, load }) => {
       const root = fs.mkdtempSync(
         path.join(os.tmpdir(), "manual-skill-review-"),
       );
@@ -1587,11 +1578,11 @@ description: Navigate Tokyo.
         {
           config: () =>
             resolveConfig({
-              routing: { skills: { maxInjectedSkills: 0 } },
+              routing: { skills: { maxInjectedSkills: limit } },
               review: {
                 enabled: true,
                 model: "fixture/review",
-                triggers: { capabilityFit: { toolCalls } },
+                triggers: { relationHealthCheck: { everyTurns } },
               },
             }),
           dataRoot: root,
@@ -1611,46 +1602,41 @@ description: Navigate Tokyo.
         messageProvider: "webchat",
       };
       try {
-        await handlers.onBeforePromptBuild(
-          { prompt: "Run the manual workflow", messages: [] },
-          ctx,
-        );
+        await handlers.onBeforePromptBuild({ prompt, messages: [] }, ctx);
         expect(tracker.getCurrentState(ctx.sessionId)?.turnKey).toBe(ctx.runId);
-        await handlers.onAfterToolCall(
-          {
-            toolName: "skill_view",
-            params: { name: "manual" },
-            result: JSON.stringify({
-              success: true,
-              name: "manual",
-              content: "Manual instructions",
-              path: path.join(root, "skills/manual/SKILL.md"),
-            }),
-          },
-          ctx,
-        );
+        if (load)
+          await handlers.onAfterToolCall(
+            {
+              toolName: "skill_view",
+              params: { name: "manual" },
+              result: JSON.stringify({
+                success: true,
+                name: "manual",
+                content: "Manual instructions",
+                path: path.join(root, "skills/manual/SKILL.md"),
+              }),
+            },
+            ctx,
+          );
         await handlers.onAgentEnd({ messages: [], success: true }, ctx);
         await handlers.onMessageSending({ content: "done" }, ctx);
 
         expect(search).not.toHaveBeenCalled();
         expect(routingSelector).not.toHaveBeenCalled();
         const state = tracker.getCurrentState(ctx.sessionId)!;
-        expect(state.skillsUsed?.map((skill) => skill.name)).toEqual([
-          "manual",
-        ]);
+        expect(state.skillsUsed?.map((skill) => skill.name) ?? []).toEqual(
+          load ? ["manual"] : [],
+        );
         expect(state.matchedSkills).toBeUndefined();
         expect(statsAggregator.isRecordable(ctx.sessionId, state)).toBe(false);
         expect(statsAggregator.listProcessedEventIds().size).toBe(0);
-        if (toolCalls === 1) {
+        if (load && everyTurns === 1) {
           expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
           expect(reviewScheduler.schedule.mock.calls[0][0]).toMatchObject({
-            triggers: ["capability-fit"],
             snapshot: {
+              turnNumber: 1,
               current: {
-                capabilityFit: {
-                  source: "tool-call-threshold",
-                  observedSkillNames: ["manual"],
-                },
+                skillsUsed: [expect.objectContaining({ name: "manual" })],
               },
             },
           });
@@ -1664,7 +1650,147 @@ description: Navigate Tokyo.
     },
   );
 
-  it("enqueues enabled multi-trigger review without awaiting it", async () => {
+  it.each([
+    { newerOwner: false, sparse: false },
+    { newerOwner: false, sparse: true },
+    { newerOwner: true, sparse: false },
+    { newerOwner: true, sparse: true },
+  ])(
+    "deduplicates completed native admissions and resumes pending ones after hook reload (newer owner: $newerOwner, sparse: $sparse)",
+    async ({ newerOwner, sparse }) => {
+      const root = fs.mkdtempSync(
+        path.join(os.tmpdir(), "native-review-reload-"),
+      );
+      const reviewScheduler = createMockReviewScheduler();
+      const config = resolveConfig({
+        review: { enabled: true, model: "fixture/review" },
+      });
+      const ctx = {
+        agentId: "main",
+        sessionId: "reloaded-session",
+        sessionKey: "agent:main:main",
+        trigger: "user" as const,
+        messageProvider: "webchat",
+      };
+      const lookup = vi.fn().mockResolvedValue(undefined);
+      function generation() {
+        const tracker = SessionTracker.create(root);
+        const handlers = createHandlers(
+          {
+            config: {},
+            runtime: {
+              state: { resolveStateDir: () => root },
+              agent: {
+                resolveAgentWorkspaceDir: () => root,
+                session: { getSessionEntryByIdAsync: lookup },
+              },
+            },
+          },
+          {
+            config: () => config,
+            dataRoot: root,
+            tracker,
+            statsAggregator: StatsAggregator.create(root),
+            reviewScheduler,
+          },
+        );
+        return {
+          tracker,
+          dispose: () => handlers.disposePromptWork(),
+          prompt: (
+            id: string,
+            runId: string,
+            sessionKey: string | undefined = ctx.sessionKey,
+          ) =>
+            handlers.onBeforePromptBuild(
+              {
+                currentUserMessageId: id,
+                currentUserMessage: "繼續",
+                prompt: "繼續",
+                messages: [],
+              },
+              { ...ctx, runId, sessionKey },
+            ),
+          load: (runId: string) =>
+            handlers.onAfterToolCall(
+              {
+                toolName: "skill_view",
+                params: { name: "manual" },
+                result: JSON.stringify({
+                  success: true,
+                  name: "manual",
+                  content: "Manual instructions",
+                  path: path.join(root, "skills/manual/SKILL.md"),
+                }),
+              },
+              { ...ctx, runId },
+            ),
+          end: (runId: string) =>
+            handlers.onAgentEnd(
+              { messages: [], success: true },
+              { ...ctx, runId },
+            ),
+        };
+      }
+      let f = generation();
+      const reload = async () => {
+        await f.dispose();
+        f = generation();
+      };
+      try {
+        for (let i = 1; i <= 9; i++) {
+          await f.prompt(`message-${i}`, `run-${i}`);
+          await f.load(`run-${i}`);
+          await f.end(`run-${i}`);
+        }
+        const ninth = f.tracker.getCurrentState(ctx.sessionId)!;
+        expect(ninth.skillTurnNumber).toBe(9);
+        expect(ninth.timestamps?.end).toBeTruthy();
+        expect(reviewScheduler.schedule).not.toHaveBeenCalled();
+
+        await reload();
+        await f.prompt("message-9", "run-9");
+        await f.load("run-9");
+        await f.end("run-9");
+        expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(ninth);
+        expect(reviewScheduler.schedule).not.toHaveBeenCalled();
+
+        // A distinct admission may legitimately reuse the predecessor's run alias.
+        await reload();
+        await f.prompt("message-10", "run-9");
+        const pending = f.tracker.getCurrentState(ctx.sessionId)!;
+        expect(pending.turnKey).not.toBe(ninth.turnKey);
+        expect(pending.timestamps?.end).toBeUndefined();
+        await reload();
+        if (newerOwner) await f.prompt("message-11", "run-11");
+        const currentKey = f.tracker.getCurrentState(ctx.sessionId)!.turnKey;
+        await f.prompt("message-10", "run-10", sparse ? "" : ctx.sessionKey);
+        expect(f.tracker.getCurrentState(ctx.sessionId)?.turnKey).toBe(
+          currentKey,
+        );
+        await f.load("run-10");
+        await f.end("run-10");
+        await f.end("run-10");
+        expect(
+          f.tracker.getTurnState(ctx.sessionId, pending.turnKey!)
+            ?.skillTurnNumber,
+        ).toBe(10);
+        if (newerOwner)
+          expect(
+            f.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+          ).toBeUndefined();
+        expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
+        expect(
+          reviewScheduler.schedule.mock.calls[0][0].snapshot.turnNumber,
+        ).toBe(10);
+      } finally {
+        await f.dispose();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("enqueues a due relation review without awaiting it", async () => {
     const snapshot = {
       sessionId: "session-1",
       agentId: "main",
@@ -1718,7 +1844,6 @@ description: Navigate Tokyo.
     });
     const reviewLogWriter = {
       inspectionOffsetsForEvent: () => () => 0,
-      completedSkillEpochKeys: vi.fn().mockReturnValue(undefined),
       record: vi.fn(),
     };
     const turnAssociations = seedAssociation("session-1", "run-1");
@@ -1761,11 +1886,6 @@ description: Navigate Tokyo.
       expect.objectContaining({ sessionId: "session-1" }),
       [],
       {
-        triggers: [
-          "relation-health-check",
-          "routing-uncertainty",
-          "capability-fit",
-        ],
         outcome: "skipped",
         relationSearchCount: 0,
         relationPreparation: {

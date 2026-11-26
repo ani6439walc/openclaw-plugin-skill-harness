@@ -33,7 +33,7 @@ async function persistStateFixture(
     startedAt,
   });
   expect(prepared.status).not.toBe("retryable-failure");
-  if (prepared.status === "retryable-failure") {
+  if (!("identity" in prepared)) {
     throw new Error("failed to prepare fixture turn");
   }
 
@@ -518,10 +518,7 @@ describe("SessionTracker", () => {
       const second = await tracker.preparePromptTurn(params);
       expect(first.status).toBe("applied");
       expect(second.status).toBe("applied");
-      if (
-        first.status === "retryable-failure" ||
-        second.status === "retryable-failure"
-      ) {
+      if (!("identity" in first) || !("identity" in second)) {
         throw new Error("failed to prepare forced turns");
       }
       const uuid =
@@ -545,6 +542,7 @@ describe("SessionTracker", () => {
         timestamps: { start: params.startedAt },
       };
       expect(saved).toEqual({
+        skillTurnCount: 0,
         sessionId: params.sessionId,
         sessionKey: params.sessionKey,
         agentId: params.agentId,
@@ -567,10 +565,7 @@ describe("SessionTracker", () => {
       });
       expect(first.status).toBe("applied");
       expect(second.status).toBe("applied");
-      if (
-        first.status === "retryable-failure" ||
-        second.status === "retryable-failure"
-      ) {
+      if (!("identity" in first) || !("identity" in second)) {
         throw new Error("failed to prepare anonymous turns");
       }
       expect(second.identity.reused).toBe(false);
@@ -597,7 +592,7 @@ describe("SessionTracker", () => {
       };
       const first = await tracker.preparePromptTurn(params);
       expect(first.status).toBe("applied");
-      if (first.status === "retryable-failure") {
+      if (!("identity" in first)) {
         throw new Error("failed to prepare anonymous turn");
       }
       const file = sessionsPath("session-a.json", tempDir);
@@ -613,6 +608,29 @@ describe("SessionTracker", () => {
         identity: { turnKey: first.identity.turnKey, reused: true },
       });
       expect(fs.readFileSync(file, "utf8")).toBe(original);
+    });
+
+    it("uses an observed reply to distinguish an anonymous repeat while awaiting the exact close", async () => {
+      const first = await persistSessionFixture(tracker, "session-a", {
+        current: { input: "repeat", matchedSkills: ["alpha"] },
+      });
+      const repeat = await tracker.preparePromptTurn({
+        sessionId: "session-a",
+        agentId: "main",
+        input: "repeat",
+        startedAt: "2026-08-12T00:00:01.000Z",
+        recentTurns: [
+          { role: "user", text: "repeat" },
+          { role: "assistant", text: "Checking inputs." },
+        ],
+      });
+      expect(repeat.status).toBe("applied");
+      const previous = tracker.getTurnState("session-a", first);
+      expect(previous?.assistantReplyObserved).toBe(true);
+      expect(previous?.timestamps?.end).toBeUndefined();
+      expect(
+        tracker.getReviewSnapshotForTurn("session-a", first),
+      ).toBeUndefined();
     });
 
     it("checks forced preparation ownership before changing persisted or in-memory state", async () => {
@@ -1743,7 +1761,7 @@ describe("SessionTracker", () => {
     });
   });
 
-  describe("getReviewSnapshot", () => {
+  describe("getReviewSnapshotForTurn", () => {
     it("returns a detached snapshot with bounded Current and full Recent results", async () => {
       let currentTurnKey = "";
       for (let index = 1; index <= 11; index += 1) {
@@ -1753,6 +1771,7 @@ describe("SessionTracker", () => {
           {
             agentId: "main",
             current: {
+              matchedSkills: ["audit"],
               input: `input-${index}-${"x".repeat(1200)}`,
               intent: {
                 result: {
@@ -1784,18 +1803,22 @@ describe("SessionTracker", () => {
               result: "r".repeat(2000),
               timestamps: {
                 start: `2026-06-11T00:${String(index).padStart(2, "0")}:00.000Z`,
+                end: `2026-06-11T00:${String(index).padStart(2, "0")}:01.000Z`,
               },
             },
           },
         );
       }
 
-      const snapshot = tracker.getReviewSnapshot("review-session");
+      const snapshot = tracker.getReviewSnapshotForTurn(
+        "review-session",
+        currentTurnKey,
+      );
       expect(snapshot).toMatchObject({
         sessionId: "review-session",
         agentId: "main",
         turnNumber: 11,
-        eventId: "review-session:2026-06-11T00:11:00.000Z",
+        eventId: `review-session:turn:${currentTurnKey}`,
       });
       expect(snapshot?.recent).toHaveLength(9);
       expect(snapshot?.current.input).toHaveLength(1000);
@@ -1823,15 +1846,10 @@ describe("SessionTracker", () => {
         "content",
       );
 
-      await expect(
-        tracker.mergeTurnAndPersist({
-          sessionId: "review-session",
-          expectedTurnKey: currentTurnKey,
-          data: { input: "changed" },
-          maxWaitMs: 0,
-        }),
-      ).resolves.toBe("applied");
-      expect(snapshot?.current.input).not.toBe("changed");
+      snapshot!.current.matchedSkills!.push("detached");
+      expect(
+        tracker.getTurnState("review-session", currentTurnKey)?.matchedSkills,
+      ).toEqual(["audit"]);
     });
 
     it("removes legacy assembled tool output from rendered Review evidence", async () => {
@@ -1862,21 +1880,32 @@ Current user request: ${request}
           timestamps: { start: "2026-07-20T00:00:00.000Z" },
         },
       });
-      await persistSessionFixture(tracker, "legacy-review-input", {
-        current: {
-          input: assembledInput("current clean request"),
-          intent: {
-            result: {
-              intent: "code-review",
-              reason: "test",
-              confidence: 0.9,
+      const turnKey = await persistSessionFixture(
+        tracker,
+        "legacy-review-input",
+        {
+          current: {
+            matchedSkills: ["audit"],
+            input: assembledInput("current clean request"),
+            intent: {
+              result: {
+                intent: "code-review",
+                reason: "test",
+                confidence: 0.9,
+              },
+            },
+            timestamps: {
+              start: "2026-07-20T00:01:00.000Z",
+              end: "2026-07-20T00:01:01.000Z",
             },
           },
-          timestamps: { start: "2026-07-20T00:01:00.000Z" },
         },
-      });
+      );
 
-      const snapshot = tracker.getReviewSnapshot("legacy-review-input");
+      const snapshot = tracker.getReviewSnapshotForTurn(
+        "legacy-review-input",
+        turnKey,
+      );
       expect(snapshot?.current.input).toBe("current clean request");
       expect(snapshot?.recent[0]?.input).toBe("previous clean request");
 
@@ -1892,40 +1921,53 @@ Current user request: ${request}
     });
 
     it("skips incomplete current turns", async () => {
-      await persistSessionFixture(tracker, "incomplete", {
-        current: { input: "hello" },
+      const turnKey = await persistSessionFixture(tracker, "incomplete", {
+        current: { input: "hello", matchedSkills: ["audit"] },
       });
-      expect(tracker.getReviewSnapshot("incomplete")).toBeUndefined();
+      expect(
+        tracker.getReviewSnapshotForTurn("incomplete", turnKey),
+      ).toBeUndefined();
     });
 
     it("does not copy projection telemetry into Review evidence", async () => {
-      await persistSessionFixture(tracker, "projection-review", {
-        current: {
-          input: "review this",
-          intent: {
-            result: {
-              intent: "code-review",
-              reason: "test",
-              confidence: 0.9,
+      const turnKey = await persistSessionFixture(
+        tracker,
+        "projection-review",
+        {
+          current: {
+            matchedSkills: ["audit"],
+            input: "review this",
+            intent: {
+              result: {
+                intent: "code-review",
+                reason: "test",
+                confidence: 0.9,
+              },
+              intentProjection: {
+                decision: "projected",
+                effectiveInput: "projected",
+                originalIntentCount: 60,
+                candidateIntentCount: 8,
+                durationMs: 2,
+                candidateIntentIds: ["code-review"],
+                candidateSelections: [],
+                supportReasons: ["high-overall-confidence"],
+                selectionReasons: ["exact-keyword-overlap"],
+                matchedKeywords: [],
+              },
             },
-            intentProjection: {
-              decision: "projected",
-              effectiveInput: "projected",
-              originalIntentCount: 60,
-              candidateIntentCount: 8,
-              durationMs: 2,
-              candidateIntentIds: ["code-review"],
-              candidateSelections: [],
-              supportReasons: ["high-overall-confidence"],
-              selectionReasons: ["exact-keyword-overlap"],
-              matchedKeywords: [],
+            timestamps: {
+              start: "2026-07-19T00:00:00.000Z",
+              end: "2026-07-19T00:00:01.000Z",
             },
           },
-          timestamps: { start: "2026-07-19T00:00:00.000Z" },
         },
-      });
+      );
 
-      const snapshot = tracker.getReviewSnapshot("projection-review");
+      const snapshot = tracker.getReviewSnapshotForTurn(
+        "projection-review",
+        turnKey,
+      );
       expect(snapshot).toBeDefined();
       expect(JSON.stringify(snapshot)).not.toContain("intentProjection");
       expect(JSON.stringify(snapshot)).not.toContain("originalIntentCount");

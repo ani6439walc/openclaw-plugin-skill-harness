@@ -63,10 +63,9 @@ async function fixture() {
   }))!;
   await context.admitSkill("b");
   const [a, b] = context.skills;
-  const finding: SkillRelationReviewFinding = {
+  const finding: Omit<SkillRelationReviewFinding, "trigger"> = {
     targetKind: "skill-relation",
     operation: "create",
-    trigger: "capability-fit",
     fromSkillId: a.identity.id,
     toSkillId: b.identity.id,
     relationType: "composes_with",
@@ -120,7 +119,6 @@ async function run(
     agentId: "main",
     modelRef: { provider: "test", model: "review" },
     snapshot,
-    triggers: ["capability-fit"],
     relationContext: context,
     abortSignal: signal,
   });
@@ -132,9 +130,10 @@ it("parses relation findings and rejects invalid structured evidence", async () 
       JSON.stringify({
         findings: [{ ...finding, hasFinding: true, ...(value as object) }],
       }),
-      ["capability-fit"],
     );
-  expect(parse({})?.findings).toEqual([finding]);
+  expect(parse({})?.findings).toEqual([
+    { ...finding, trigger: "relation-health-check" },
+  ]);
   expect(
     parse({ relationEvidence: [finding.relationEvidence[0]] })?.findings,
   ).toEqual([]);
@@ -143,14 +142,13 @@ it("requires an independent relation assessment and checks it against proposed o
   const { context, finding } = await fixture();
   const parse = (
     relationReview?: unknown,
-    findings: unknown[] = [{ trigger: "capability-fit", hasFinding: false }],
+    findings: unknown[] = [{ hasFinding: false }],
   ) =>
     parseReviewFindingsDetailed(
       JSON.stringify({
         findings,
         ...(relationReview ? { relationReview } : {}),
       }),
-      ["capability-fit"],
       context,
     );
   expect(parse()?.invalidRelationReview).toBe(true);
@@ -174,7 +172,7 @@ it("requires an independent relation assessment and checks it against proposed o
 });
 it("builds a relation-only prompt with both assessment decisions", async () => {
   const { context } = await fixture();
-  const prompt = buildReviewPrompt(snapshot, ["capability-fit"], context);
+  const prompt = buildReviewPrompt(snapshot, context);
   expect(prompt).toContain('operation="create"|"update"|"delete"');
   expect(prompt).toContain("relationEvidence");
   expect(prompt).not.toMatch(/experience/i);
@@ -185,15 +183,13 @@ it("builds a relation-only prompt with both assessment decisions", async () => {
         line.startsWith('{"findings":') &&
         line.includes('"operation":"update"'),
     )!;
-  expect(
-    parseReviewFindingsDetailed(updateExample, ["capability-fit"])?.findings[0],
-  ).toMatchObject({ targetKind: "skill-relation", operation: "update" });
+  expect(parseReviewFindingsDetailed(updateExample)?.findings[0]).toMatchObject(
+    { targetKind: "skill-relation", operation: "update" },
+  );
   const example = prompt.split("No-change example: ")[1];
-  expect(
-    parseReviewFindingsDetailed(example!, ["capability-fit"], context),
-  ).toMatchObject({
+  expect(parseReviewFindingsDetailed(example!, context)).toMatchObject({
     findings: [],
-    missingRequestedTriggers: [],
+    missingDecision: false,
     relationReview: { existing: "not-applicable", discovery: "no-change" },
   });
 });
@@ -264,9 +260,8 @@ it("logs validation codes and paths without rejected evidence", async () => {
         { ...finding, hasFinding: true, evidence: "PRIVATE-EVIDENCE-MARKER" },
       ],
     }),
-    ["capability-fit"],
   );
-  expect(parsed?.missingRequestedTriggers).toEqual(["capability-fit"]);
+  expect(parsed?.missingDecision).toBe(true);
   const message = warn.mock.calls.find(([entry]) =>
     entry.startsWith("dropping invalid review finding "),
   )?.[0];
