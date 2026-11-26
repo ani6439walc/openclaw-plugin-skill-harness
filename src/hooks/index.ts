@@ -158,7 +158,6 @@ function matchPendingCallback<T>(
   callbacks: Map<string, T>,
   association: TurnAssociation,
   getSessionId: (callback: T) => string | undefined,
-  allowKeylessWithoutId = false,
 ): T | undefined {
   for (const key of [association.sessionKey, ""]) {
     if (key === undefined) continue;
@@ -167,7 +166,7 @@ function matchPendingCallback<T>(
     const sessionId = getSessionId(callback);
     if (
       sessionId === association.sessionId ||
-      (sessionId === undefined && (key !== "" || allowKeylessWithoutId))
+      (sessionId === undefined && key !== "")
     )
       return callback;
   }
@@ -175,6 +174,51 @@ function matchPendingCallback<T>(
 
 function attemptKey(association: TurnAssociation): string {
   return `${association.sessionId}\0${association.turnKey}`;
+}
+
+function attemptSlotKey(
+  ctx: Pick<AttemptContext, "sessionId" | "sessionKey">,
+): string {
+  const sessionKey = normalizeTurnAssociationKey(ctx.sessionKey);
+  if (sessionKey) return `key:${sessionKey}`;
+  const sessionId = normalizeTurnAssociationKey(ctx.sessionId);
+  if (sessionId) return `id:${sessionId}`;
+  return "run-only";
+}
+
+function attemptIdentityTier(
+  attempt: ObservedAttempt,
+  association: TurnAssociation,
+): 0 | 1 | 2 {
+  const sessionId = normalizeTurnAssociationKey(attempt.ctx.sessionId);
+  const sessionKey = normalizeTurnAssociationKey(attempt.ctx.sessionKey);
+  if (
+    (sessionId && sessionId !== association.sessionId) ||
+    (sessionKey &&
+      sessionKey !== association.sessionKey &&
+      sessionKey !== association.sessionId)
+  )
+    return 0;
+  return sessionId || sessionKey ? 2 : 1;
+}
+
+function selectBestAttempt(
+  candidates: Iterable<ObservedAttempt> | undefined,
+  association: TurnAssociation,
+): ObservedAttempt | undefined {
+  let best: ObservedAttempt | undefined;
+  let bestTier = 0;
+  for (const attempt of candidates ?? []) {
+    const tier = attemptIdentityTier(attempt, association);
+    if (
+      tier > bestTier ||
+      (tier === bestTier && best && attempt.sequence > best.sequence)
+    ) {
+      best = attempt;
+      bestTier = tier;
+    }
+  }
+  return best;
 }
 
 function extractTerminalReplyText(reply: unknown): string | undefined {
@@ -319,7 +363,7 @@ export function createHookHandlers(deps: HookDeps) {
   const bundledSkillsDir = deps.bundledSkillsDir;
   const nativeBundledSkillsDir = deps.nativeBundledSkillsDir;
   const sharedRoots = () => deps.getSharedRoots?.() ?? [];
-  const observedAttempts = new Map<string, ObservedAttempt>();
+  const observedAttempts = new Map<string, Map<string, ObservedAttempt>>();
   const maxObservedAttempts = 4096;
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const toolFallbacks = deps.toolFallbacks ?? new ToolFallbackRegistry();
@@ -600,7 +644,7 @@ export function createHookHandlers(deps: HookDeps) {
     );
     // An in-flight lookup can still bind a newer canonical key for this run.
     if (!settlement) return false;
-    promotePendingAttempt(pending, association);
+    promotePendingAttempts(pending, association);
     pendingNativeRuns.delete(runId);
     await onAgentLifecycleEvent(settlement);
     return true;
@@ -1442,6 +1486,25 @@ export function createHookHandlers(deps: HookDeps) {
         invocationSeq,
       );
       assertRequestActive(true);
+      async function bindTrackedNativeAdmission(): Promise<void> {
+        if (!nativeRequest) return;
+        let tracked = nativeRequest.retainedReplay ?? nativeRequest.association;
+        if (!tracked && nativeRequest.preparation) {
+          const prepared = await nativeRequest.preparation.catch(
+            () => undefined,
+          );
+          assertRequestActive(true);
+          retainPromptSessionKey(nativeRequest, routing);
+          tracked =
+            nativeRequest.retainedReplay ??
+            nativeRequest.association ??
+            prepared;
+        }
+        if (tracked) {
+          await bindNativeReplay(runId, nativeRequest, tracked, routing);
+          assertRequestActive(true);
+        }
+      }
       if (nativeRequest) {
         retainPromptSessionKey(nativeRequest, routing);
         turnAssociations.updatePendingNativeRunSessionKey(
@@ -1450,25 +1513,13 @@ export function createHookHandlers(deps: HookDeps) {
           routing.resolvedSessionKey,
           routing,
         );
-        let trackedAssociation =
-          nativeRequest.retainedReplay ?? nativeRequest.association;
-        if (!trackedAssociation && nativeRequest.preparation) {
-          const prepared = await nativeRequest.preparation.catch(
-            () => undefined,
-          );
-          assertRequestActive(true);
-          trackedAssociation = nativeRequest.association ?? prepared;
-        }
-        if (trackedAssociation) {
-          await bindNativeReplay(
-            runId,
-            nativeRequest,
-            trackedAssociation,
-            routing,
-          );
-          if (nativeRequest.retainedReplay) return;
-          assertRequestActive(true);
-        }
+        if (
+          nativeRequest.retainedReplay ||
+          nativeRequest.association ||
+          nativeRequest.preparation
+        )
+          await bindTrackedNativeAdmission();
+        if (nativeRequest.retainedReplay) return;
       }
       resolvedSessionKey = routing.resolvedSessionKey ?? resolvedSessionKey;
 
@@ -1492,17 +1543,19 @@ export function createHookHandlers(deps: HookDeps) {
         resolveWorkingSetSkillsXml(routing.effectiveAgentId),
       );
       assertRequestActive(true);
+      if (nativeRequest) {
+        retainPromptSessionKey(nativeRequest, routing);
+        // A no-op await here would let another invocation start preparation
+        // between checking for tracked work and deciding whether to route.
+        if (nativeRequest.association || nativeRequest.preparation)
+          await bindTrackedNativeAdmission();
+        resolvedSessionKey = routing.resolvedSessionKey ?? resolvedSessionKey;
+        resolvedContext.sessionKey = resolvedSessionKey;
+      }
       if (
         admissionId !== undefined &&
         (!request || replay || request.state === "finalized")
       ) {
-        if (!replay && nativeRequest?.association)
-          await bindNativeReplay(
-            runId,
-            nativeRequest,
-            nativeRequest.association,
-            routing,
-          );
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
       intentContextEnabled = isEnabledForAgent(
@@ -1912,7 +1965,7 @@ export function createHookHandlers(deps: HookDeps) {
         pendingNativeRuns.delete(runId);
         const association = turnAssociations.resolve(runId);
         if (association) {
-          promotePendingAttempt(pendingNative, association);
+          promotePendingAttempts(pendingNative, association);
         } else {
           for (const settlement of pendingNative.settlements.values())
             turnAssociations.markRunSettled(runId, settlement);
@@ -2217,10 +2270,11 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookAgentEndEvent,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
+    const sessionId = normalizeTurnAssociationKey(ctx.sessionId);
     const association = resolveAssociatedTurn({
       eventRunId: event.runId,
       contextRunId: ctx.runId,
-      sessionId: ctx.sessionId,
+      sessionId,
       sessionKey: ctx.sessionKey,
     });
     let pending: PendingNativeRun | undefined;
@@ -2232,9 +2286,7 @@ export function createHookHandlers(deps: HookDeps) {
       pending = runId ? pendingNativeRuns.get(runId) : undefined;
       if (
         !pending ||
-        (ctx.sessionId !== undefined &&
-          pending.sessionId !== undefined &&
-          ctx.sessionId !== pending.sessionId)
+        (sessionId && pending.sessionId && sessionId !== pending.sessionId)
       )
         return;
     }
@@ -2259,13 +2311,12 @@ export function createHookHandlers(deps: HookDeps) {
       rememberObservedAttempt(association, attempt);
       await flushToolFallbacks(association);
     } else if (pending) {
+      const slot = attemptSlotKey(attempt.ctx);
       if (
-        !normalizeTurnAssociationKey(ctx.sessionKey) &&
-        ctx.sessionId === undefined &&
-        pending.attempts.get("")?.ctx.sessionId !== undefined
+        pending.attempts.has(slot) ||
+        pending.attempts.size < maxPendingCallbacksPerRun
       )
-        return;
-      stagePendingCallback(pending.attempts, ctx.sessionKey, attempt);
+        pending.attempts.set(slot, attempt);
     }
   }
 
@@ -2273,9 +2324,27 @@ export function createHookHandlers(deps: HookDeps) {
     association: TurnAssociation,
     attempt: ObservedAttempt,
   ): void {
+    if (attemptIdentityTier(attempt, association) === 0) return;
     const key = attemptKey(association);
+    const attempts =
+      observedAttempts.get(key) ?? new Map<string, ObservedAttempt>();
+    const slot = attemptSlotKey(attempt.ctx);
+    const previous = attempts.get(slot);
+    if (previous && previous.sequence >= attempt.sequence) return;
+    if (!previous && attempts.size >= maxPendingCallbacksPerRun) {
+      // Provisional keys can fill the bucket. Make room without evicting any
+      // attempt compatible with the current binding.
+      for (const [candidateSlot, candidate] of attempts) {
+        if (attemptIdentityTier(candidate, association) === 0) {
+          attempts.delete(candidateSlot);
+          break;
+        }
+      }
+      if (attempts.size >= maxPendingCallbacksPerRun) return;
+    }
+    attempts.set(slot, attempt);
     observedAttempts.delete(key);
-    observedAttempts.set(key, attempt);
+    observedAttempts.set(key, attempts);
     if (observedAttempts.size > maxObservedAttempts) {
       const oldest = observedAttempts.keys().next().value;
       if (oldest !== undefined) observedAttempts.delete(oldest);
@@ -2285,33 +2354,17 @@ export function createHookHandlers(deps: HookDeps) {
   function getObservedAttempt(
     association: TurnAssociation,
   ): ObservedAttempt | undefined {
-    const rawObserved = observedAttempts.get(attemptKey(association));
-    if (!rawObserved) return;
-    const { sessionId, sessionKey } = rawObserved.ctx;
-    const observedSessionKey = normalizeTurnAssociationKey(sessionKey);
-    if (
-      (!sessionId || sessionId === association.sessionId) &&
-      (!observedSessionKey ||
-        observedSessionKey === association.sessionKey ||
-        observedSessionKey === association.sessionId)
-    )
-      return rawObserved;
+    return selectBestAttempt(
+      observedAttempts.get(attemptKey(association))?.values(),
+      association,
+    );
   }
 
-  function promotePendingAttempt(
+  function promotePendingAttempts(
     pending: PendingNativeRun,
     association: TurnAssociation,
   ): void {
-    const attempt = matchPendingCallback(
-      pending.attempts,
-      association,
-      (candidate) => candidate.ctx.sessionId,
-      true,
-    );
-    if (
-      attempt &&
-      attempt.sequence > (getObservedAttempt(association)?.sequence ?? 0)
-    )
+    for (const attempt of pending.attempts.values())
       rememberObservedAttempt(association, attempt);
   }
 
@@ -2359,7 +2412,7 @@ export function createHookHandlers(deps: HookDeps) {
       return;
     }
 
-    if (pending) promotePendingAttempt(pending, association);
+    if (pending) promotePendingAttempts(pending, association);
     const key = attemptKey(association);
     const observed = getObservedAttempt(association);
     const facts = resolveAgentRunLifecycleTerminalFacts({ phase, data });
