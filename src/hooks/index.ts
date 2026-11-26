@@ -134,12 +134,11 @@ interface ObservedAttempt {
   ctx: AttemptContext;
 }
 
-interface PendingNativeRun {
+interface PendingNativeRun extends SessionKeyVersion {
   owner: object;
   request?: PromptRequestOwner<string | undefined>;
   sessionId?: string;
-  hostSessionKey?: string;
-  hostSessionKeySeq: number;
+  sessionKey?: string;
   invocations: number;
   attempts: Map<string, ObservedAttempt>;
   settlements: Map<string, AgentLifecycleEvent>;
@@ -147,29 +146,37 @@ interface PendingNativeRun {
 
 const maxPendingCallbacksPerRun = 8;
 
+function updatePendingSessionKey(
+  pending: PendingNativeRun | undefined,
+  sessionKey: string | undefined,
+  version: SessionKeyVersion,
+): void {
+  const normalized = normalizeTurnAssociationKey(sessionKey);
+  if (!pending || !normalized) return;
+  if (!pending.sessionKey || canUpdateSessionKey(pending, version)) {
+    pending.sessionKey = normalized;
+    pending.sessionKeyPriority = version.sessionKeyPriority;
+    pending.sessionKeySeq = version.sessionKeySeq;
+  }
+}
+
 function getPendingEffectiveSessionKey(
   pending: PendingNativeRun | undefined,
 ): string | undefined {
   if (!pending) return;
   const request = pending.request;
-  const requestKey = normalizeTurnAssociationKey(request?.resolvedSessionKey);
-  const hostKey = pending.hostSessionKey;
+  const sharedHostKey =
+    request?.sessionKeyPriority === SESSION_KEY_PRIORITY.host
+      ? normalizeTurnAssociationKey(request.resolvedSessionKey)
+      : undefined;
+  const localKey = pending.sessionKey;
   if (
     request &&
-    requestKey &&
-    (request.sessionKeyPriority ?? SESSION_KEY_PRIORITY.none) >
-      SESSION_KEY_PRIORITY.none &&
-    (!hostKey ||
-      canUpdateSessionKey(
-        {
-          sessionKeyPriority: SESSION_KEY_PRIORITY.host,
-          sessionKeySeq: pending.hostSessionKeySeq,
-        },
-        request,
-      ))
+    sharedHostKey &&
+    (!localKey || canUpdateSessionKey(pending, request))
   )
-    return requestKey;
-  return hostKey;
+    return sharedHostKey;
+  return localKey;
 }
 
 function evictUnverifiedKey<T>(
@@ -1472,10 +1479,11 @@ export function createHookHandlers(deps: HookDeps) {
         (nativeRequest?.state !== "current"
           ? nativeRequest?.association
           : undefined);
+      const hostKey = normalizeTurnAssociationKey(ctx.sessionKey);
+      let nativeClaim: "claimed" | "same-owner" | "blocked" | undefined;
       if (admissionId !== undefined && runId) {
-        const hostKey = normalizeTurnAssociationKey(ctx.sessionKey);
         const owner = request ?? {};
-        const claim = turnAssociations.claimNativeRun(
+        nativeClaim = turnAssociations.claimNativeRun(
           runId,
           owner,
           ownerSessionId,
@@ -1486,22 +1494,21 @@ export function createHookHandlers(deps: HookDeps) {
             sessionKeySeq: invocationSeq,
           },
         );
-        if (claim === "blocked") {
+        if (nativeClaim === "blocked") {
           pendingNativeRuns.delete(runId);
         } else if (!replay?.finalized && request?.state !== "finalized") {
           pendingNative = pendingNativeRuns.get(runId) ?? {
             owner,
             request,
             sessionId: ownerSessionId,
-            hostSessionKeySeq: 0,
             invocations: 0,
             attempts: new Map(),
             settlements: new Map(),
           };
-          if (hostKey && invocationSeq > pendingNative.hostSessionKeySeq) {
-            pendingNative.hostSessionKey = hostKey;
-            pendingNative.hostSessionKeySeq = invocationSeq;
-          }
+          updatePendingSessionKey(pendingNative, hostKey, {
+            sessionKeyPriority: SESSION_KEY_PRIORITY.host,
+            sessionKeySeq: invocationSeq,
+          });
           pendingNative.invocations++;
           pendingNativeRuns.set(runId, pendingNative);
         }
@@ -1513,6 +1520,21 @@ export function createHookHandlers(deps: HookDeps) {
           promptExecutions.assertRequestCurrent(request, allowFinalized);
       };
       assertRequestActive(true);
+      if (
+        nativeRequest &&
+        hostKey &&
+        nativeClaim !== "blocked" &&
+        !replay?.finalized &&
+        nativeRequest.state !== "finalized"
+      ) {
+        retainPromptSessionKey(nativeRequest, {
+          effectiveAgentId: resolveStatusUpdateAgentId(ctx),
+          resolvedSessionKey: hostKey,
+          sessionKeyPriority: SESSION_KEY_PRIORITY.host,
+          sessionKeySeq: invocationSeq,
+          request: nativeRequest,
+        });
+      }
       const routing = await resolvePromptBuildIdentity(
         ctx,
         replay ? undefined : request,
@@ -1529,6 +1551,11 @@ export function createHookHandlers(deps: HookDeps) {
           );
           assertRequestActive(true);
           retainPromptSessionKey(nativeRequest, routing);
+          updatePendingSessionKey(
+            pendingNative,
+            routing.resolvedSessionKey,
+            routing,
+          );
           tracked =
             nativeRequest.retainedReplay ??
             nativeRequest.association ??
@@ -1541,6 +1568,11 @@ export function createHookHandlers(deps: HookDeps) {
       }
       if (nativeRequest) {
         retainPromptSessionKey(nativeRequest, routing);
+        updatePendingSessionKey(
+          pendingNative,
+          routing.resolvedSessionKey,
+          routing,
+        );
         turnAssociations.updatePendingNativeRunSessionKey(
           runId,
           nativeRequest,

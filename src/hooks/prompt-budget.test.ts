@@ -1609,6 +1609,187 @@ describe("native admission identity", () => {
     });
   });
 
+  it.each(["settlement", "attempt"] as const)(
+    "does not let an earlier replay alias's SDK lookup evict another replay alias's canonical %s before its own lookup resolves",
+    async (callback) => {
+      const { f, admitted, retained, newer, replayCtx } =
+        await retainedReplayFixture();
+      const firstLookup =
+        deferred<Awaited<ReturnType<typeof f.sessionLookup>>>(undefined);
+      const secondLookup =
+        deferred<Awaited<ReturnType<typeof f.sessionLookup>>>(undefined);
+      f.sessionLookup
+        .mockReturnValueOnce(firstLookup.promise)
+        .mockReturnValueOnce(secondLookup.promise);
+
+      const { sessionId } = replayCtx;
+      const olderKey = "agent:main:discord:direct:replay-older-sdk";
+      const newerKey = "agent:main:discord:direct:replay-newer-sdk";
+      const runA = "replay-alias-a";
+      const runB = "replay-alias-b";
+
+      const first = f.handlers.onBeforePromptBuild(admitted, {
+        ...replayCtx,
+        runId: runA,
+      });
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+      firstLookup.resolve({ sessionKey: olderKey, entry: { sessionId } });
+      await first;
+
+      const second = f.handlers.onBeforePromptBuild(admitted, {
+        ...replayCtx,
+        runId: runB,
+      });
+      await until(() => f.sessionLookup.mock.calls.length === 2);
+
+      const canonical = { runId: runB, sessionKey: newerKey };
+      const record = (
+        context: typeof canonical & { sessionId?: string },
+        reply: string,
+      ) =>
+        callback === "settlement"
+          ? settleRun(f.handlers, context, reply)
+          : f.handlers.onAgentEnd(
+              {
+                success: true,
+                messages: [{ role: "assistant", content: reply }],
+              },
+              context,
+            );
+      const slot = (key: string) =>
+        callback === "attempt" ? `key:${key}` : key;
+      const bucket = await captureCallbackBucket(slot(newerKey), () =>
+        record(canonical, "alias b canonical reply"),
+      );
+      for (let index = 0; index < 7; index++) {
+        await record(
+          { runId: runB, sessionKey: `agent:main:direct:nonmatching-${index}` },
+          "nonmatching reply",
+        );
+      }
+      expect(bucket.size).toBe(8);
+
+      await record(
+        { runId: runB, sessionId, sessionKey: olderKey },
+        "alias a stale sdk reply",
+      );
+      if (callback === "attempt")
+        await settleRun(f.handlers, canonical, "terminal fallback");
+
+      expect(bucket.size).toBe(8);
+      expect(bucket.has(slot(newerKey))).toBe(true);
+      expect(bucket.has(slot(olderKey))).toBe(false);
+
+      secondLookup.resolve({ sessionKey: newerKey, entry: { sessionId } });
+      await second;
+
+      expect(f.tracker.getTurnState(sessionId, retained)).toMatchObject({
+        result: "alias b canonical reply",
+        timestamps: { end: expect.any(String) },
+      });
+      expect(f.tracker.getCurrentState(sessionId)).toEqual(newer);
+    },
+  );
+
+  it("publishes a sibling run's newer host key before yielding so earlier SDK callbacks cannot evict it", async () => {
+    const f = fixture();
+    const sdkKey = "agent:main:discord:direct:sdk-before-sibling-host";
+    const hostKey = "agent:main:discord:direct:sibling-host-before-yield";
+    const lookup =
+      deferred<Awaited<ReturnType<typeof f.sessionLookup>>>(undefined);
+    const workingSet = deferred(["fixture"]);
+    f.sessionLookup.mockReturnValueOnce(lookup.promise);
+    f.getWorkingSetSkills.mockReturnValueOnce(workingSet.promise);
+    const admitted = {
+      ...event,
+      currentUserMessageId: "sibling-host-before-yield",
+    };
+    const firstRunId = "run-sdk-first";
+    const first = f.handlers.onBeforePromptBuild(admitted, {
+      ...ctx,
+      runId: firstRunId,
+      sessionKey: undefined,
+    });
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+
+    const { sessionId } = ctx;
+    lookup.resolve({ sessionKey: sdkKey, entry: { sessionId } });
+    await until(() => f.getWorkingSetSkills.mock.calls.length === 1);
+
+    const observe = (context: PluginHookAgentContext, reply: string) =>
+      f.handlers.onAgentEnd(
+        { success: true, messages: [{ role: "assistant", content: reply }] },
+        context,
+      );
+    const attemptBucket = await captureCallbackBucket(`key:${hostKey}`, () =>
+      observe({ runId: firstRunId, sessionKey: hostKey }, "sibling host reply"),
+    );
+    for (let index = 0; index < 7; index++) {
+      await observe(
+        {
+          runId: firstRunId,
+          sessionKey: `agent:main:direct:nonmatching-${index}`,
+        },
+        "nonmatching attempt",
+      );
+    }
+    const settlementBucket = await captureCallbackBucket(hostKey, () =>
+      settleRun(
+        f.handlers,
+        { runId: firstRunId, sessionKey: hostKey },
+        "sibling host terminal fallback",
+      ),
+    );
+    for (let index = 0; index < 7; index++) {
+      await settleRun(
+        f.handlers,
+        {
+          runId: firstRunId,
+          sessionKey: `agent:main:direct:nonmatching-${index}`,
+        },
+        "nonmatching settlement",
+      );
+    }
+    expect(attemptBucket.size).toBe(8);
+    expect(settlementBucket.size).toBe(8);
+
+    const siblingWorkingSet = deferred(["fixture"]);
+    f.getWorkingSetSkills.mockReturnValueOnce(siblingWorkingSet.promise);
+    // Start the sibling with a newer host key, then deliver both callbacks
+    // synchronously before its first await can resume.
+    const sibling = f.handlers.onBeforePromptBuild(admitted, {
+      ...ctx,
+      runId: "run-host-sibling",
+      sessionKey: hostKey,
+    });
+    const staleAttempt = observe(
+      { runId: firstRunId, sessionId, sessionKey: sdkKey },
+      "stale sdk attempt",
+    );
+    const staleSettlement = settleRun(
+      f.handlers,
+      { runId: firstRunId, sessionId, sessionKey: sdkKey },
+      "stale sdk settlement",
+    );
+    await Promise.all([staleAttempt, staleSettlement]);
+
+    expect(attemptBucket.size).toBe(8);
+    expect(attemptBucket.has(`key:${hostKey}`)).toBe(true);
+    expect(attemptBucket.has(`key:${sdkKey}`)).toBe(false);
+    expect(settlementBucket.size).toBe(8);
+    expect(settlementBucket.has(hostKey)).toBe(true);
+    expect(settlementBucket.has(sdkKey)).toBe(false);
+
+    workingSet.resolve(["fixture"]);
+    siblingWorkingSet.resolve(["fixture"]);
+    await Promise.all([first, sibling]);
+
+    expect(f.tracker.getCurrentState(sessionId)).toMatchObject({
+      result: "sibling host reply",
+      timestamps: { end: expect.any(String) },
+    });
+  });
+
   it("admits a verified settlement to a full staged bucket", async () => {
     const { f, admitted, retained, replayCtx, match } =
       await retainedReplayFixture();
