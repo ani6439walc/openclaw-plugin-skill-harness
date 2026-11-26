@@ -380,6 +380,61 @@ describe("TurnAssociationRegistry", () => {
     expect(registry.hasActiveSession("session-a")).toBe(false);
   });
 
+  it.each(["active", "terminal"])(
+    "promotes a %s pinned alias using its original capacity",
+    (state) => {
+      const registry = new TurnAssociationRegistry({
+        maxEntries: 1,
+        maxNativeEntries: 1,
+      });
+      const turn = { sessionId: "session", turnKey: "turn" };
+      const owner = {};
+      expect(registry.pinAnonymousRun("pinned", turn)).toBe(true);
+      if (state === "terminal") registry.markTerminal("pinned", turn);
+
+      expect(
+        registry.claimNativeRun("pinned", owner, turn.sessionId, " key ", turn),
+      ).toBe("same-owner");
+      expect(registry.resolve("pinned")).toEqual(
+        state === "active" ? { ...turn, sessionKey: "key" } : undefined,
+      );
+      expect(registry.hasActiveSession("key")).toBe(state === "active");
+      expect(registry.claimNativeRun("another", {}, "another-session")).toBe(
+        "claimed",
+      );
+      expect(registry.reserve("legacy").status).toBe("full");
+    },
+  );
+
+  it("clears activity on native collisions and fences exact settled runs from rebinding", () => {
+    const registry = new TurnAssociationRegistry();
+    const owner = {};
+    const turn = {
+      sessionId: "session",
+      sessionKey: "canonical",
+      turnKey: "one",
+    };
+    registry.claimNativeRun("settled", owner, turn.sessionId, turn.sessionKey);
+    registry.claimNativeRun(
+      "collision",
+      owner,
+      turn.sessionId,
+      turn.sessionKey,
+    );
+    registry.markRunSettled("unknown", turn);
+    expect(registry.hasRun("unknown")).toBe(false);
+    registry.markRunSettled(" settled ", turn);
+    expect(registry.hasRun("settled")).toBe(true);
+    expect(registry.bindNativeRun("settled", owner, turn)).toBe("stale");
+    expect(registry.hasActiveSession(turn.sessionKey)).toBe(true);
+
+    expect(registry.claimNativeRun("collision", {}, "other")).toBe("blocked");
+    expect(registry.hasActiveSession(turn.sessionId)).toBe(false);
+    expect(registry.hasActiveSession(turn.sessionKey)).toBe(false);
+    expect(registry.hasRun("collision")).toBe(true);
+    expect(registry.bindNativeRun("collision", owner, turn)).toBe("ambiguous");
+  });
+
   it("keeps unfinished anonymous predecessors through TTL and capacity pressure", () => {
     let now = 0;
     const registry = new TurnAssociationRegistry({

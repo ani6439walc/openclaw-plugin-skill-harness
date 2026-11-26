@@ -97,7 +97,11 @@ import type {
   PluginHookToolResultPersistEvent,
 } from "./types.js";
 import {
+  canUpdateSessionKey,
+  normalizeTurnAssociationKey,
+  SESSION_KEY_PRIORITY,
   TurnAssociationRegistry,
+  type SessionKeyVersion,
   type TurnAssociation,
 } from "./turn-associations.js";
 import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
@@ -127,6 +131,13 @@ interface ObservedAttempt {
   error?: string;
   success: boolean;
   ctx: AttemptContext;
+}
+
+interface PendingReplayLookup {
+  owner: PromptRequestOwner<string | undefined>;
+  invocations: number;
+  attempt?: ObservedAttempt;
+  settlement?: AgentLifecycleEvent;
 }
 
 function attemptKey(association: TurnAssociation): string {
@@ -294,6 +305,10 @@ export function createHookHandlers(deps: HookDeps) {
   const anonymousPreparations = new Map<string, Promise<unknown>>();
   const turnAssociations =
     deps.turnAssociations ?? new TurnAssociationRegistry();
+  // Only admitted native fences can enter this map, so its run IDs share the
+  // registry's capacity limit. Staged events live only as long as their lookup.
+  const pendingReplayLookups = new Map<string, PendingReplayLookup>();
+  let nextPromptInvocationSeq = 0;
 
   const reviewScheduler =
     deps.reviewScheduler ??
@@ -423,7 +438,7 @@ export function createHookHandlers(deps: HookDeps) {
     );
   });
 
-  interface PromptBuildIdentity {
+  interface PromptBuildIdentity extends SessionKeyVersion {
     effectiveAgentId: string;
     resolvedSessionKey?: string;
     association?: TurnAssociation;
@@ -434,12 +449,21 @@ export function createHookHandlers(deps: HookDeps) {
     ctx: PluginHookAgentContext,
     request: PromptRequestOwner<string | undefined> | undefined,
     nativeAdmission: boolean,
+    sessionKeySeq: number,
   ): Promise<PromptBuildIdentity> {
     const resolvedAgentId = resolveStatusUpdateAgentId(ctx);
     let resolvedSessionKey = ctx.sessionKey?.trim() || undefined;
+    let sessionKeyPriority: SessionKeyVersion["sessionKeyPriority"] =
+      resolvedSessionKey
+        ? SESSION_KEY_PRIORITY.host
+        : SESSION_KEY_PRIORITY.none;
     if (!resolvedSessionKey && resolvedAgentId) {
       if (request?.state === "finalized") {
         resolvedSessionKey = request.resolvedSessionKey;
+        if (resolvedSessionKey) {
+          sessionKeyPriority = request.sessionKeyPriority;
+          sessionKeySeq = request.sessionKeySeq ?? sessionKeySeq;
+        }
       } else if (!nativeAdmission || request) {
         const lookup = () =>
           resolveCanonicalSessionKeyFromSessionId({
@@ -450,6 +474,8 @@ export function createHookHandlers(deps: HookDeps) {
         resolvedSessionKey = request
           ? await promptExecutions.lookupRequest(request, lookup)
           : await promptExecutions.track(lookup());
+        if (normalizeTurnAssociationKey(resolvedSessionKey))
+          sessionKeyPriority = SESSION_KEY_PRIORITY.sdk;
       }
     }
     resolvedSessionKey = resolvedSessionKey?.trim() || undefined;
@@ -467,8 +493,74 @@ export function createHookHandlers(deps: HookDeps) {
             request.admissionId,
           )
           ?.sessionKey?.trim() || undefined;
+      if (resolvedSessionKey)
+        sessionKeyPriority = SESSION_KEY_PRIORITY.persisted;
     }
-    return { effectiveAgentId: resolvedAgentId, resolvedSessionKey, request };
+    return {
+      effectiveAgentId: resolvedAgentId,
+      resolvedSessionKey,
+      sessionKeyPriority,
+      sessionKeySeq,
+      request,
+    };
+  }
+
+  function retainPromptSessionKey(
+    request: PromptRequestOwner<string | undefined>,
+    identity: PromptBuildIdentity,
+  ): void {
+    if (
+      identity.resolvedSessionKey &&
+      (!request.resolvedSessionKey || canUpdateSessionKey(request, identity))
+    ) {
+      request.resolvedSessionKey = identity.resolvedSessionKey;
+      request.sessionKeyPriority = identity.sessionKeyPriority;
+      request.sessionKeySeq = identity.sessionKeySeq;
+    } else if (request.resolvedSessionKey) {
+      identity.resolvedSessionKey = request.resolvedSessionKey;
+      identity.sessionKeyPriority = request.sessionKeyPriority;
+      identity.sessionKeySeq = request.sessionKeySeq;
+    }
+  }
+
+  async function bindNativeReplay(
+    runId: string | undefined,
+    owner: PromptRequestOwner<string | undefined>,
+    replay: TurnAssociation,
+    identity: PromptBuildIdentity,
+  ): Promise<void> {
+    const bound = turnAssociations.bindNativeRun(
+      runId,
+      owner,
+      {
+        ...replay,
+        sessionKey: identity.resolvedSessionKey ?? replay.sessionKey,
+      },
+      {
+        sessionKeyPriority: identity.resolvedSessionKey
+          ? identity.sessionKeyPriority
+          : SESSION_KEY_PRIORITY.persisted,
+        sessionKeySeq: identity.sessionKeySeq,
+      },
+    );
+    if (replay.finalized) turnAssociations.markAssociationTerminal(replay);
+    if (!runId || bound !== "bound") return;
+
+    const pending = pendingReplayLookups.get(runId);
+    if (pending?.owner !== owner) return;
+    pendingReplayLookups.delete(runId);
+    const association = turnAssociations.resolve(runId);
+    if (!association) return;
+    const attempt = pending.attempt;
+    const attemptSessionKey = normalizeTurnAssociationKey(
+      attempt?.ctx.sessionKey,
+    );
+    if (
+      attempt &&
+      (!attemptSessionKey || attemptSessionKey === association.sessionKey)
+    )
+      rememberObservedAttempt(association, attempt);
+    if (pending.settlement) await onAgentLifecycleEvent(pending.settlement);
   }
 
   async function prepareTrackingTurn(params: {
@@ -533,7 +625,12 @@ export function createHookHandlers(deps: HookDeps) {
       };
       if (runId) {
         // An ambiguous run alias must not conflate independent admissions.
-        turnAssociations.bindNativeRun(runId, request, association);
+        turnAssociations.bindNativeRun(runId, request, association, {
+          sessionKeyPriority: hostSessionKey
+            ? params.routing.sessionKeyPriority
+            : SESSION_KEY_PRIORITY.persisted,
+          sessionKeySeq: params.routing.sessionKeySeq,
+        });
       } else {
         const reservation = turnAssociations.reserveAnonymous();
         if (reservation.status === "reserved")
@@ -1186,11 +1283,14 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookBeforePromptBuildEvent,
     ctx: PluginHookAgentContext,
   ): Promise<PluginHookBeforePromptBuildResult | undefined> {
+    const invocationSeq = ++nextPromptInvocationSeq;
+    const runId = normalizeTurnAssociationKey(ctx.runId);
     let resolvedSessionKey = ctx.sessionKey;
     let staticContextEligible = false;
     let workingSetSkillsXml: string | undefined;
     let intentContextEnabled = false;
     let request: PromptRequestOwner<string | undefined> | undefined;
+    let pendingReplay: PendingReplayLookup | undefined;
     try {
       ctx.hookInvocation?.assertActive();
       // Preserve static-only fallback after dynamic shutdown for a supplied key.
@@ -1218,7 +1318,6 @@ export function createHookHandlers(deps: HookDeps) {
       const ownerSessionId =
         ctx.sessionId ??
         tracker.resolveCurrentSessionId?.({ sessionKey: ctx.sessionKey });
-      const runId = ctx.runId?.trim() || undefined;
       const legacyInput =
         admissionId === undefined && !runId
           ? buildConversationContext(
@@ -1240,14 +1339,6 @@ export function createHookHandlers(deps: HookDeps) {
               tracker.getNativeTurnIdentity?.(sessionId, agentId, id),
           )
         : undefined;
-      if (admissionId !== undefined && ctx.runId) {
-        // This is an event-rejection fence, not a turn reservation or admission.
-        turnAssociations.claimNativeRun(
-          ctx.runId,
-          request ?? {},
-          ownerSessionId,
-        );
-      }
       const nativeRequest =
         request?.admissionId !== undefined ? request : undefined;
       const replay =
@@ -1255,19 +1346,30 @@ export function createHookHandlers(deps: HookDeps) {
         (nativeRequest?.state !== "current"
           ? nativeRequest?.association
           : undefined);
-      const bindNativeReplay = (
-        owner: PromptRequestOwner<string | undefined>,
-        replay: TurnAssociation,
-        sessionKey: string | undefined,
-      ) => {
-        if (runId) {
-          turnAssociations.bindNativeRun(runId, owner, {
-            ...replay,
-            sessionKey: sessionKey || replay.sessionKey,
-          });
+      if (admissionId !== undefined && runId) {
+        const hostKey = normalizeTurnAssociationKey(ctx.sessionKey);
+        const claim = turnAssociations.claimNativeRun(
+          runId,
+          request ?? {},
+          ownerSessionId,
+          hostKey,
+          request?.association ?? request?.retainedReplay,
+          {
+            sessionKeyPriority: SESSION_KEY_PRIORITY.host,
+            sessionKeySeq: invocationSeq,
+          },
+        );
+        if (claim === "blocked") {
+          pendingReplayLookups.delete(runId);
+        } else if (nativeRequest && replay && !replay.finalized) {
+          pendingReplay = pendingReplayLookups.get(runId) ?? {
+            owner: nativeRequest,
+            invocations: 0,
+          };
+          pendingReplay.invocations++;
+          pendingReplayLookups.set(runId, pendingReplay);
         }
-        if (replay.finalized) turnAssociations.markAssociationTerminal(replay);
-      };
+      }
       const assertRequestActive = (allowFinalized = false) => {
         ctx.hookInvocation?.assertActive();
         promptExecutions.assertActive();
@@ -1279,21 +1381,30 @@ export function createHookHandlers(deps: HookDeps) {
         ctx,
         replay ? undefined : request,
         !replay && admissionId !== undefined,
+        invocationSeq,
       );
       assertRequestActive(true);
-      if (nativeRequest && replay) {
-        // Settled lifecycle can finalize the retained owner during the SDK lookup.
-        const currentReplay =
-          nativeRequest.retainedReplay ?? nativeRequest.association ?? replay;
-        routing.resolvedSessionKey ||= currentReplay.sessionKey;
-        bindNativeReplay(
+      if (nativeRequest) {
+        if (replay && !routing.resolvedSessionKey && replay.sessionKey) {
+          routing.resolvedSessionKey = replay.sessionKey;
+          routing.sessionKeyPriority = SESSION_KEY_PRIORITY.persisted;
+        }
+        retainPromptSessionKey(nativeRequest, routing);
+        turnAssociations.updatePendingNativeRunSessionKey(
+          runId,
           nativeRequest,
-          currentReplay,
           routing.resolvedSessionKey,
+          routing,
         );
-        if (nativeRequest.retainedReplay) return;
+        if (replay) {
+          // Another run may have settled the turn while this lookup waited.
+          const currentReplay =
+            nativeRequest.retainedReplay ?? nativeRequest.association ?? replay;
+          await bindNativeReplay(runId, nativeRequest, currentReplay, routing);
+          if (nativeRequest.retainedReplay) return;
+          assertRequestActive(true);
+        }
       }
-      if (request) request.resolvedSessionKey = routing.resolvedSessionKey;
       resolvedSessionKey = routing.resolvedSessionKey ?? resolvedSessionKey;
 
       const resolvedContext = {
@@ -1321,10 +1432,11 @@ export function createHookHandlers(deps: HookDeps) {
         (!request || replay || request.state === "finalized")
       ) {
         if (!replay && nativeRequest?.association)
-          bindNativeReplay(
+          await bindNativeReplay(
+            runId,
             nativeRequest,
             nativeRequest.association,
-            routing.resolvedSessionKey,
+            routing,
           );
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
@@ -1726,6 +1838,16 @@ export function createHookHandlers(deps: HookDeps) {
           )
         : undefined;
     } finally {
+      if (
+        runId &&
+        pendingReplay &&
+        pendingReplayLookups.get(runId) === pendingReplay &&
+        --pendingReplay.invocations === 0
+      ) {
+        pendingReplayLookups.delete(runId);
+        if (pendingReplay.settlement)
+          turnAssociations.markRunSettled(runId, pendingReplay.settlement);
+      }
       if (request) promptExecutions.releaseRequest(request);
     }
   }
@@ -2031,11 +2153,20 @@ export function createHookHandlers(deps: HookDeps) {
       sessionId: ctx.sessionId,
       sessionKey: ctx.sessionKey,
     });
-    if (!association) return;
-
-    const key = attemptKey(association);
-    observedAttempts.delete(key);
-    observedAttempts.set(key, {
+    let pending: PendingReplayLookup | undefined;
+    if (!association) {
+      const eventRunId = normalizeTurnAssociationKey(event.runId);
+      const contextRunId = normalizeTurnAssociationKey(ctx.runId);
+      if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
+      const runId = eventRunId ?? contextRunId;
+      pending = runId ? pendingReplayLookups.get(runId) : undefined;
+      if (
+        !pending ||
+        (ctx.sessionId && ctx.sessionId !== pending.owner.sessionId)
+      )
+        return;
+    }
+    const attempt: ObservedAttempt = {
       ...extractAgentEndPayload({
         messages: event.messages,
         error: event.error,
@@ -2050,12 +2181,26 @@ export function createHookHandlers(deps: HookDeps) {
         modelProviderId: ctx.modelProviderId,
         modelId: ctx.modelId,
       },
-    });
+    };
+    if (association) {
+      rememberObservedAttempt(association, attempt);
+      await flushToolFallbacks(association);
+    } else if (pending) {
+      pending.attempt = attempt;
+    }
+  }
+
+  function rememberObservedAttempt(
+    association: TurnAssociation,
+    attempt: ObservedAttempt,
+  ): void {
+    const key = attemptKey(association);
+    observedAttempts.delete(key);
+    observedAttempts.set(key, attempt);
     if (observedAttempts.size > maxObservedAttempts) {
       const oldest = observedAttempts.keys().next().value;
       if (oldest !== undefined) observedAttempts.delete(oldest);
     }
-    await flushToolFallbacks(association);
   }
 
   async function onAgentLifecycleEvent(
@@ -2078,7 +2223,17 @@ export function createHookHandlers(deps: HookDeps) {
       sessionId: event.sessionId,
       sessionKey: event.sessionKey,
     });
-    if (!association) return;
+    if (!association) {
+      const runId = event.runId.trim();
+      const pending = pendingReplayLookups.get(runId);
+      if (pending) {
+        if (!event.sessionId || event.sessionId === pending.owner.sessionId)
+          pending.settlement = event;
+      } else {
+        turnAssociations.markRunSettled(runId, event);
+      }
+      return;
+    }
 
     const key = attemptKey(association);
     const observed = observedAttempts.get(key);
@@ -2252,6 +2407,10 @@ export function createHookHandlers(deps: HookDeps) {
     promptExecutions.removeSession(ctx.sessionId);
     turnAssociations.removeSession(ctx.sessionId);
     toolFallbacks.removeSession(ctx.sessionId);
+    for (const [runId, pending] of pendingReplayLookups) {
+      if (pending.owner.sessionId === ctx.sessionId)
+        pendingReplayLookups.delete(runId);
+    }
     for (const key of observedAttempts.keys()) {
       if (key.startsWith(`${ctx.sessionId}\0`)) observedAttempts.delete(key);
     }

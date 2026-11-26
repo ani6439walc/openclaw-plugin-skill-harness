@@ -1,4 +1,7 @@
-import type { TurnAssociation } from "./turn-associations.js";
+import type {
+  SessionKeyVersion,
+  TurnAssociation,
+} from "./turn-associations.js";
 
 interface PromptExecution<T> {
   turnKey: string;
@@ -6,7 +9,7 @@ interface PromptExecution<T> {
   result: Promise<T>;
 }
 
-export interface PromptRequestOwner<T> {
+export interface PromptRequestOwner<T> extends SessionKeyVersion {
   readonly agentId: string;
   readonly sessionId: string;
   readonly admissionId?: string;
@@ -166,7 +169,6 @@ export class PromptExecutions<T> {
         this.assertRequestCurrent(request, true);
         const key = await operation();
         this.assertRequestCurrent(request, true);
-        request.resolvedSessionKey = key;
         return key;
       }),
     );

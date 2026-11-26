@@ -93,7 +93,7 @@ async function until(predicate: () => boolean) {
 }
 function settleRun(
   handlers: ReturnType<typeof createHookHandlers>,
-  context: Pick<typeof ctx, "runId" | "sessionId" | "sessionKey">,
+  context: Pick<typeof ctx, "runId" | "sessionId"> & { sessionKey?: string },
 ) {
   return handlers.onAgentLifecycleEvent({
     ...context,
@@ -575,6 +575,251 @@ describe("native admission identity", () => {
     await pending;
     expect(f.turnAssociations.hasRun("late-replay")).toBe(true);
     expect(f.turnAssociations.resolve("late-replay")).toBeUndefined();
+  });
+
+  it.each(["host", "SDK"])(
+    "releases Review activity for a skipped native run with a %s key",
+    async (source) => {
+      const f = fixture();
+      const skipped = { ...event, currentUserMessageId: "skipped" };
+      await f.handlers.onBeforePromptBuild(skipped, {
+        ...ctx,
+        sessionKey: source === "host" ? ctx.sessionKey : undefined,
+        inputProvenance: { kind: "internal_system" },
+      });
+      expect(f.tracker.getCurrentState(ctx.sessionId)?.turnKey).toBeUndefined();
+      expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(true);
+      expect(f.turnAssociations.hasActiveSession(ctx.sessionKey)).toBe(true);
+      await settleRun(f.handlers, { ...ctx, sessionId: "another-session" });
+      await settleRun(f.handlers, { ...ctx, sessionKey: "agent:main:other" });
+      expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(true);
+
+      await settleRun(f.handlers, ctx);
+      expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(false);
+      expect(f.turnAssociations.hasActiveSession(ctx.sessionKey)).toBe(false);
+      expect(f.turnAssociations.hasRun(ctx.runId)).toBe(true);
+
+      await f.handlers.onBeforePromptBuild(
+        { ...event, currentUserMessageId: "anonymous" },
+        { ...ctx, runId: undefined },
+      );
+      const active = f.tracker.getCurrentState(ctx.sessionId);
+      expect(active?.turnKey).toBeTruthy();
+      await settleRun(f.handlers, ctx);
+      expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(active);
+    },
+  );
+
+  it.each(["same", "different", "already settled"])(
+    "handles a pinned anonymous run rebuilt by the %s admission",
+    async (admission) => {
+      const f = fixture();
+      const admitted = { ...event, currentUserMessageId: "admitted" };
+      await f.handlers.onBeforePromptBuild(admitted, {
+        ...ctx,
+        runId: undefined,
+      });
+      const turnKey = f.tracker.getCurrentState(ctx.sessionId)!.turnKey!;
+      await f.handlers.onBeforeToolCall(
+        { toolName: "read", params: {}, runId: ctx.runId },
+        ctx,
+      );
+      expect(f.turnAssociations.resolve(ctx.runId)?.turnKey).toBe(turnKey);
+      if (admission === "already settled") await settleRun(f.handlers, ctx);
+      const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+      await f.handlers.onBeforePromptBuild(
+        admission === "different"
+          ? { ...admitted, currentUserMessageId: "other" }
+          : admitted,
+        ctx,
+      );
+      const open = admission === "same";
+      expect(f.turnAssociations.resolve(ctx.runId)?.turnKey).toBe(
+        open ? turnKey : undefined,
+      );
+      await settleRun(f.handlers, ctx);
+      expect(finalize).toHaveBeenCalledTimes(open ? 1 : 0);
+      if (open)
+        expect(
+          f.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+        ).toBeTruthy();
+      expect(f.turnAssociations.hasRun(ctx.runId)).toBe(true);
+      expect(f.turnAssociations.resolve(ctx.runId)).toBeUndefined();
+    },
+  );
+
+  async function retainedReplayFixture() {
+    const before = fixture();
+    const admitted = { ...event, currentUserMessageId: "retained" };
+    await before.handlers.onBeforePromptBuild(admitted, ctx);
+    const retained = before.tracker.getCurrentState(ctx.sessionId)!.turnKey!;
+    await before.handlers.disposePromptWork();
+    const f = fixture(before.root);
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "newer" },
+      { ...ctx, runId: "newer-run" },
+    );
+    const newer = f.tracker.getCurrentState(ctx.sessionId);
+    const replayCtx = { ...ctx, runId: "retained-run", sessionKey: undefined };
+    const currentKey = "agent:main:direct:current";
+    const match = {
+      sessionKey: currentKey,
+      entry: { sessionId: ctx.sessionId },
+    };
+    return { f, admitted, retained, newer, replayCtx, match };
+  }
+
+  it.each([
+    "settlement only",
+    "with attempt",
+    "wrong attempt key",
+    "wrong settlement key",
+    "wrong session ID",
+    "aborted lookup",
+    "ended session",
+  ])(
+    "correlates events during a retained replay lookup ($0)",
+    async (scenario) => {
+      const { f, admitted, retained, newer, replayCtx, match } =
+        await retainedReplayFixture();
+      const lookup = deferred<typeof match | undefined>(undefined);
+      f.sessionLookup.mockReturnValueOnce(lookup.promise);
+      let aborted = false;
+      const pending = f.handlers.onBeforePromptBuild(admitted, {
+        ...replayCtx,
+        hookInvocation: {
+          assertActive: () => {
+            if (aborted) throw new Error("expired invocation");
+          },
+        },
+      });
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+      const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+      const wrongKey = "agent:main:direct:other";
+      const settledCtx = {
+        ...replayCtx,
+        sessionId:
+          scenario === "wrong session ID" ? "another-session" : ctx.sessionId,
+        sessionKey:
+          scenario === "wrong settlement key" ? wrongKey : match.sessionKey,
+      };
+      await settleRun(f.handlers, settledCtx);
+      const hasAttempt =
+        scenario === "with attempt" || scenario === "wrong attempt key";
+      if (hasAttempt) {
+        await f.handlers.onAgentEnd(
+          {
+            runId: replayCtx.runId,
+            success: true,
+            messages: [{ role: "assistant", content: "early reply" }],
+          },
+          {
+            ...replayCtx,
+            sessionKey:
+              scenario === "wrong attempt key" ? wrongKey : match.sessionKey,
+          },
+        );
+      }
+      expect(finalize).not.toHaveBeenCalled();
+      aborted = scenario === "aborted lookup";
+      if (scenario === "ended session") {
+        await f.handlers.onSessionEnd(
+          { sessionId: ctx.sessionId, messageCount: 0 },
+          ctx,
+        );
+      }
+      lookup.resolve(match);
+      await pending;
+
+      if (scenario === "ended session") {
+        expect(finalize).not.toHaveBeenCalled();
+        expect(f.turnAssociations.hasRun(replayCtx.runId)).toBe(false);
+        expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(false);
+        return;
+      }
+      const shouldSettle = scenario === "settlement only" || hasAttempt;
+      expect(finalize).toHaveBeenCalledTimes(shouldSettle ? 1 : 0);
+      const turn = f.tracker.getTurnState(ctx.sessionId, retained);
+      if (shouldSettle) expect(turn?.timestamps?.end).toBeTruthy();
+      else expect(turn?.timestamps?.end).toBeUndefined();
+      expect(turn?.result).toBe(
+        scenario === "with attempt" ? "early reply" : undefined,
+      );
+      expect(f.turnAssociations.hasRun(replayCtx.runId)).toBe(true);
+      if (shouldSettle || aborted) {
+        expect(f.turnAssociations.resolve(replayCtx.runId)).toBeUndefined();
+        await settleRun(f.handlers, settledCtx);
+        expect(finalize).toHaveBeenCalledTimes(shouldSettle ? 1 : 0);
+      } else {
+        expect(f.turnAssociations.resolve(replayCtx.runId)?.turnKey).toBe(
+          retained,
+        );
+        await settleRun(f.handlers, {
+          ...replayCtx,
+          sessionKey: match.sessionKey,
+        });
+        expect(finalize).toHaveBeenCalledOnce();
+      }
+      expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(newer);
+      if (aborted) {
+        await settleRun(f.handlers, { ...ctx, runId: "newer-run" });
+        expect(f.turnAssociations.hasActiveSession(ctx.sessionId)).toBe(false);
+      }
+    },
+  );
+
+  it.each([
+    "older SDK, newer host",
+    "older persisted fallback, newer host",
+    "older SDK, newer SDK",
+    "older SDK after newer host settled",
+    "older SDK, deferred settlement applied by newer host",
+  ])("preserves the winning retained replay key ($0)", async (scenario) => {
+    const { f, admitted, retained, newer, replayCtx, match } =
+      await retainedReplayFixture();
+    const firstLookup = deferred<typeof match | undefined>(undefined);
+    f.sessionLookup
+      .mockReturnValueOnce(firstLookup.promise)
+      .mockResolvedValueOnce(match);
+    const pending = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    const settleCtx = { ...replayCtx, sessionKey: match.sessionKey };
+    const finalize = vi.spyOn(f.tracker, "finalizeTurnFromAgentEnd");
+    const settledWhilePending = scenario.includes("deferred settlement");
+    if (settledWhilePending) {
+      await settleRun(f.handlers, settleCtx);
+      expect(finalize).not.toHaveBeenCalled();
+    }
+    await f.handlers.onBeforePromptBuild(admitted, {
+      ...replayCtx,
+      sessionKey:
+        scenario === "older SDK, newer SDK" ? undefined : match.sessionKey,
+    });
+    const settledEarly = scenario.endsWith("settled");
+    if (settledEarly) await settleRun(f.handlers, settleCtx);
+    if (settledWhilePending) expect(finalize).toHaveBeenCalledOnce();
+    firstLookup.resolve(
+      scenario.includes("persisted")
+        ? undefined
+        : {
+            ...match,
+            sessionKey: "agent:main:direct:old",
+          },
+    );
+    await pending;
+    if (!settledEarly && !settledWhilePending) {
+      expect(f.turnAssociations.resolve(replayCtx.runId)).toMatchObject({
+        turnKey: retained,
+        sessionKey: match.sessionKey,
+      });
+    }
+    await settleRun(f.handlers, settleCtx);
+    expect(finalize).toHaveBeenCalledOnce();
+    expect(
+      f.tracker.getTurnState(ctx.sessionId, retained)?.timestamps?.end,
+    ).toBeTruthy();
+    expect(f.turnAssociations.resolve(replayCtx.runId)).toBeUndefined();
+    expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(newer);
   });
 
   it.each(["current", "history"] as const)(
