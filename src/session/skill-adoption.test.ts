@@ -86,7 +86,6 @@ describe("skill adoption evidence", () => {
           expectedTurnKey: "turn",
           data: {
             matchedSkills: ["sample"],
-            matchedExperiences: [],
             toolCalls: [call],
           },
         });

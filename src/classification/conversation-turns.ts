@@ -2,8 +2,6 @@ import {
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
   ROUTING_ADVISORY_SKILLS_ONLY_HEADER,
-  ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
-  ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER,
   ROUTING_ADVISORY_LEGACY_HEADER,
 } from "../constants.js";
 import type { RecentTurn } from "../types.js";
@@ -13,6 +11,12 @@ import {
   isInterSessionUserMessage,
   promptRepresentsMessage,
 } from "./conversation-provenance.js";
+
+// Strip advisory headers from turns recorded before experience routing was retired.
+const LEGACY_ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER =
+  "Inferred relevant skills and experiences from conversation (advisory, non-user input; load with `skill_view` or `skill_experience` if relevant):";
+const LEGACY_ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER =
+  "Inferred relevant experiences from conversation (advisory, non-user input; load with `skill_experience` if relevant):";
 
 const OPENCLAW_ASSEMBLED_CONTEXT_HEADER =
   "OpenClaw assembled context for this turn:";
@@ -39,9 +43,9 @@ export function sanitizeConversationText(text: string): string {
     .join(" ")
     .split(ROUTING_ADVISORY_SKILLS_ONLY_HEADER)
     .join(" ")
-    .split(ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER)
+    .split(LEGACY_ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER)
     .join(" ")
-    .split(ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER)
+    .split(LEGACY_ROUTING_ADVISORY_EXPERIENCES_ONLY_HEADER)
     .join(" ")
     .split(ROUTING_ADVISORY_LEGACY_HEADER)
     .join(" ")

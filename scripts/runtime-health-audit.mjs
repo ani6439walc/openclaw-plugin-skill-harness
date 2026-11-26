@@ -7,6 +7,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { DatabaseSync } from "node:sqlite";
+import {
+  PROCESSED_EVENT_OUTCOMES,
+  ReviewLogSchema,
+} from "../dist/src/review/log.js";
 
 const SCRIPT_PATH = fs.realpathSync(fileURLToPath(import.meta.url));
 const RETENTION_DAYS = 14;
@@ -22,15 +26,9 @@ const LATENCY_BUCKETS = [
   "5000+",
 ];
 const ROUTE_REASONS = ["qmd-keyword", "qmd-hybrid", "llm-classifier"];
-const OUTCOMES = [
-  "applied",
-  "partially-applied",
-  "nofinding",
-  "schema-rejected",
-  "parse-failed",
-  "subagent-error",
-  "validation-failed",
-];
+const COMPLETED_OUTCOMES = PROCESSED_EVENT_OUTCOMES.filter(
+  (value) => value !== "skipped",
+);
 const isObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const objectOrEmpty = (value) => (isObject(value) ? value : {});
@@ -149,12 +147,11 @@ function requireObject(value, field, target) {
   return value[field];
 }
 function loadReviewLog(target) {
-  const value = loadJson(target);
-  if (value.schemaVersion !== 8)
-    throw new Error(`${target} must be a current schema-v8 review log`);
-  for (const field of ["processedEvents", "reviewedSkillEpochs"])
-    requireObject(value, field, target);
-  return value;
+  const parsed = ReviewLogSchema.safeParse(loadJson(target));
+  // Zod issues can contain private event IDs, paths, and rejected values.
+  if (!parsed.success)
+    throw new Error("review.json must be a valid schema-v9 review log");
+  return parsed.data;
 }
 function loadStats(target) {
   const value = loadJson(target);
@@ -302,22 +299,6 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
         : null,
   };
 }
-function qmdHealth(root) {
-  const experiences = path.join(root, "experiences"),
-    intents = path.join(root, "intents");
-  const useExperiences =
-    isFile(path.join(experiences, "experience-routing.sqlite")) ||
-    (isDirectory(experiences) &&
-      !isFile(path.join(intents, "intent-routing.sqlite")));
-  const snapshot = useExperiences ? experiences : intents;
-  return qmdDatabaseHealth(
-    snapshot,
-    path.join(
-      snapshot,
-      useExperiences ? "experience-routing.sqlite" : "intent-routing.sqlite",
-    ),
-  );
-}
 function skillQmdHealth(root) {
   const roots = children(root)
     .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
@@ -392,120 +373,52 @@ function sessionHealth(sessionsDir, agentsDir) {
     ).length,
   };
 }
-function countExperiences(root) {
-  const dirs = children(root).filter((entry) =>
-    isDirectory(path.join(root, entry.name)),
-  );
-  const files = walk(root).filter(
-    (target) => target.endsWith(".md") && isFile(target),
-  );
-  return {
-    count: dirs.length,
-    markdownFiles: files.length,
-    bytes: sum(files.map((target) => fs.statSync(target).size)),
-  };
-}
 
 function reviewChangeSummary(events) {
   const outcomes = counter(),
     changesPerEvent = counter(),
     changesByTrigger = counter(),
     operations = counter(),
-    targetIntents = counter(),
-    targetExperiences = counter(),
     triggerEvents = counter(),
     noFindingReasons = counter(),
     schemaRejectionReasons = counter(),
     preparation = counter(),
     skipReasons = counter(),
     existingAssessments = counter(),
-    discoveryAssessments = counter(),
-    committedOperations = counter();
+    discoveryAssessments = counter();
   let searchCalls = 0,
-    eventsWithoutPreparation = 0,
-    invalidRecords = 0;
-  for (const event of values(events)) {
-    if (!isObject(event)) {
-      invalidRecords++;
-      continue;
-    }
-    const outcome = event.outcome;
-    increment(outcomes, typeof outcome === "string" ? outcome : "<non-string>");
+    eventsWithoutPreparation = 0;
+  for (const event of Object.values(events)) {
     const prep = event.relationPreparation;
-    if (isObject(prep) && ["ready", "skipped"].includes(prep.status)) {
+    if (prep) {
       increment(preparation, prep.status);
-      if (
-        [
-          "no-seeds",
-          "registry-unavailable",
-          "no-eligible-seeds",
-          "preparation-failed",
-          "no-data-root",
-        ].includes(prep.reason)
-      )
-        increment(skipReasons, prep.reason);
+      if (prep.reason) increment(skipReasons, prep.reason);
     } else eventsWithoutPreparation++;
-    const assessment = objectOrEmpty(event.relationReview);
-    for (const [field, counts] of [
-      ["existing", existingAssessments],
-      ["discovery", discoveryAssessments],
-    ])
-      if (
-        ["changes-proposed", "no-change", "not-applicable"].includes(
-          assessment[field],
-        )
-      )
-        increment(counts, assessment[field]);
-    if (
-      Number.isInteger(event.relationSearchCount) &&
-      event.relationSearchCount >= 0 &&
-      event.relationSearchCount <= 4
-    )
-      searchCalls += event.relationSearchCount;
-    for (const trigger of Array.isArray(event.triggers) ? event.triggers : [])
-      if (typeof trigger === "string") increment(triggerEvents, trigger);
-    const changes =
-      ["applied", "partially-applied"].includes(outcome) &&
-      Array.isArray(event.changes)
-        ? event.changes
-        : [];
-    increment(changesPerEvent, String(changes.length));
-    for (const change of changes) {
-      if (!isObject(change)) {
-        invalidRecords++;
-        continue;
-      }
-      if (typeof change.trigger === "string")
-        increment(changesByTrigger, change.trigger);
-      if (typeof change.operation === "string") {
-        increment(operations, change.operation);
-        if (
-          change.targetKind === "skill-relation" &&
-          ["create", "update", "delete"].includes(change.operation)
-        )
-          increment(committedOperations, change.operation);
-      }
-      for (const [field, counts] of [
-        ["targetIntentIds", targetIntents],
-        ["targetExperienceIds", targetExperiences],
-      ])
-        for (const id of Array.isArray(change[field]) ? change[field] : [])
-          if (typeof id === "string") increment(counts, id);
+    if (event.outcome === "skipped") continue;
+    increment(outcomes, event.outcome);
+    if (event.relationReview) {
+      increment(existingAssessments, event.relationReview.existing);
+      increment(discoveryAssessments, event.relationReview.discovery);
     }
-    for (const [field, counts] of [
-      ["noFindingReasonCounts", noFindingReasons],
-      ["schemaRejectionReasonCounts", schemaRejectionReasons],
-    ])
-      for (const [reason, count] of entries(event[field]))
-        if (Number.isInteger(count)) increment(counts, reason, count);
+    searchCalls += event.relationSearchCount ?? 0;
+    for (const trigger of event.triggers) increment(triggerEvents, trigger);
+    increment(changesPerEvent, String(event.changeCount));
+    for (const change of event.changes ?? []) {
+      increment(changesByTrigger, change.trigger);
+      increment(operations, change.operation);
+    }
+    for (const [reason, count] of entries(event.noFindingReasonCounts))
+      increment(noFindingReasons, reason, count);
+    for (const [reason, count] of entries(event.schemaRejectionReasonCounts))
+      increment(schemaRejectionReasons, reason, count);
   }
   const eventCount = sum([...outcomes.values()]),
     total = sum([...changesByTrigger.values()]),
-    appliedEvents =
-      (outcomes.get("applied") ?? 0) + (outcomes.get("partially-applied") ?? 0);
+    appliedEvents = outcomes.get("applied") ?? 0;
   return {
     eventCount,
-    invalidRecords,
+    skippedPreparations: preparation.get("skipped") ?? 0,
+    invalidRecords: 0,
     outcomes: counterDict(outcomes),
     changes: {
       appliedEvents,
@@ -516,8 +429,6 @@ function reviewChangeSummary(events) {
       eventsByChangeCount: counterDict(changesPerEvent),
       byTrigger: counterDict(changesByTrigger),
       byOperation: counterDict(operations),
-      topTargetExperiences: topCounts(targetExperiences, "experience"),
-      topTargetIntents: topCounts(targetIntents, "intent"),
     },
     triggerEvents: counterDict(triggerEvents),
     noFindingReasons: counterDict(noFindingReasons),
@@ -528,7 +439,7 @@ function reviewChangeSummary(events) {
       existingAssessments: counterDict(existingAssessments),
       discoveryAssessments: counterDict(discoveryAssessments),
       searchCalls,
-      committedOperations: counterDict(committedOperations),
+      committedOperations: counterDict(operations),
       eventsWithoutPreparation,
     },
   };
@@ -823,7 +734,7 @@ function discoveryAnalysis(rows) {
       ).length,
       injectedSkillCount: observedSum(rows, "qmdSearch", "injectedSkills"),
       injectedCountMeaning:
-        "includes experience-source skills; not pure skill-search conversion",
+        "schema-v7 QMD bucket, including historical routing sources; attribution is not a search conversion rate",
     },
     pool: {
       nonEmptyTurns: ratio(observedSum(rows, "pool", "nonEmptyTurns"), turns),
@@ -877,13 +788,14 @@ function reviewAnalysis(review, start, end) {
     });
   const result = reviewChangeSummary(Object.fromEntries(selected));
   const completed = selected
+    .filter(([, event]) => event.outcome !== "skipped")
     .map(([, value]) => value.processedAt)
     .sort((a, b) => isoTimestamp(b) - isoTimestamp(a));
   return {
     ...result,
     status: "observed-completed-events",
     outcomeRates: Object.fromEntries(
-      OUTCOMES.map((outcome) => [
+      COMPLETED_OUTCOMES.map((outcome) => [
         outcome,
         ratio(result.outcomes[outcome] ?? 0, result.eventCount),
       ]),
@@ -946,7 +858,6 @@ function routingObservations(root) {
         at,
         completed: end !== null,
         skills: nameList(raw.matchedSkills),
-        experiences: nameList(raw.matchedExperiences),
         used: nameList(raw.skillsUsed, true),
         confidence: observedNumber(raw.confidence),
         discovery: pick(discovery, [
@@ -956,7 +867,6 @@ function routingObservations(root) {
           "retrievalCandidates",
           "durationMs",
         ]),
-        experienceRetrieval: discovery.experienceRetrieval,
       };
       const key = JSON.stringify([session.sessionId, identity]),
         priority = Number(end !== null) * 2 + Number(current),
@@ -970,9 +880,7 @@ function routingObservations(root) {
 }
 function sessionAnalysis(records, start, end) {
   const rows = records.filter((row) => start <= row.at && row.at < end),
-    routed = rows.filter(
-      (row) => row.skills !== null && row.experiences !== null,
-    ),
+    routed = rows.filter((row) => row.skills !== null),
     completeUsage = routed.filter((row) => row.completed && row.used !== null),
     usage = new Map();
   for (const row of completeUsage)
@@ -1003,59 +911,10 @@ function sessionAnalysis(records, start, end) {
     adoption: ratio(count.adoptedTurns, count.injectedTurns),
     lowSample: count.injectedTurns < 20,
   }));
-  const statuses = counter(),
-    thresholds = counter(),
-    scores = [];
-  let candidates = 0,
-    hits = 0,
-    selected = 0,
-    selectedCount = 0,
-    candidateRows = 0,
-    candidateWithHits = 0,
-    scoreRows = 0;
-  for (const row of routed) {
-    const retrieval = objectOrEmpty(row.experienceRetrieval),
-      status = retrieval.status;
-    increment(
-      statuses,
-      ["completed", "disabled", "unavailable", "timeout", "error"].includes(
-        status,
-      )
-        ? status
-        : "unobserved",
-    );
-    if (status !== "completed") continue;
-    const n = observedNumber(retrieval.candidateCount);
-    if (n !== null) {
-      candidateRows++;
-      candidates += n;
-      candidateWithHits += Number(n > 0);
-      if (n > 0) {
-        selected += Number(row.experiences.size > 0);
-        selectedCount += row.experiences.size;
-      }
-    }
-    if (Array.isArray(retrieval.hits)) {
-      hits += retrieval.hits.length;
-      scoreRows++;
-      for (const hit of retrieval.hits) {
-        const score = observedNumber(objectOrEmpty(hit).semanticScore);
-        if (score !== null) scores.push(score);
-      }
-    }
-    const threshold = observedNumber(retrieval.minCandidateScore);
-    if (threshold !== null) increment(thresholds, String(threshold));
-  }
   const poolRows = routed.filter(
-    (row) =>
-      observedNumber(row.discovery.candidateCount) !== null &&
-      observedNumber(objectOrEmpty(row.experienceRetrieval).candidateCount) !==
-        null,
+    (row) => observedNumber(row.discovery.candidateCount) !== null,
   );
-  const nonempty = poolRows.filter(
-    (row) =>
-      row.discovery.candidateCount + row.experienceRetrieval.candidateCount > 0,
-  );
+  const nonempty = poolRows.filter((row) => row.discovery.candidateCount > 0);
   return {
     status: rows.length ? "observed" : "unavailable",
     source: "retained-session-routing-fields",
@@ -1072,15 +931,11 @@ function sessionAnalysis(records, start, end) {
       poolObservedTurns: poolRows.length,
       emptyPoolTurns: poolRows.length - nonempty.length,
       nonEmptyWithoutInjection: ratio(
-        nonempty.filter((row) => !row.skills.size && !row.experiences.size)
-          .length,
+        nonempty.filter((row) => !row.skills.size).length,
         nonempty.length,
       ),
       skillInjectedTurns: routed.filter((row) => row.skills.size > 0).length,
-      experienceInjectedTurns: routed.filter((row) => row.experiences.size > 0)
-        .length,
       injectedSkills: sum(routed.map((row) => row.skills.size)),
-      injectedExperiences: sum(routed.map((row) => row.experiences.size)),
       confidence: numericSummary(
         routed
           .map((row) => row.confidence)
@@ -1091,18 +946,6 @@ function sessionAnalysis(records, start, end) {
           .map((row) => observedNumber(row.discovery.durationMs))
           .filter((value) => value !== null),
       ),
-    },
-    experienceRetrieval: {
-      statuses: counterDict(statuses),
-      statusDenominator: routed.length,
-      candidateObservedTurns: candidateRows,
-      hitTurns: ratio(candidateWithHits, candidateRows),
-      candidateCount: candidateRows ? candidates : null,
-      hitCount: scoreRows ? hits : null,
-      selectedFromNonEmpty: ratio(selected, candidateWithHits),
-      selectedExperiencesFromNonEmpty: candidateRows ? selectedCount : null,
-      semanticScore: numericSummary(scores),
-      observedThresholds: counterDict(thresholds),
     },
     skills: {
       topUsed: ranked(skillUsage, "usageTurns"),
@@ -1328,8 +1171,7 @@ export function buildReport(
       `runtime state changed while being read: ${changed.join(", ")}`,
     );
   const intentPaths = directFiles(path.join(dataRoot, "intents"), ".md"),
-    qmd = qmdHealth(path.join(dataRoot, "qmd"));
-  qmd.skills = skillQmdHealth(path.join(dataRoot, "qmd/skills/indexes"));
+    qmd = { skills: skillQmdHealth(path.join(dataRoot, "qmd/skills/indexes")) };
   return {
     schemaVersion: 1,
     reportOnly: true,
@@ -1353,7 +1195,6 @@ export function buildReport(
         path.join(dataRoot, "sessions"),
         path.join(dataRoot, "agents"),
       ),
-      experiences: countExperiences(path.join(dataRoot, "experiences")),
       intents: {
         markdownFiles: intentPaths.length,
         bytes: sum(intentPaths.map((target) => fs.statSync(target).size)),

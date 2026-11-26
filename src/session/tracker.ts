@@ -52,23 +52,12 @@ export type InputSkillDiscovery = {
   retrievalAttempted: boolean;
   retrievalCandidates: number;
   retrievalSemanticScores: number[];
-  experienceRetrieval?: {
-    status: "disabled" | "unavailable" | "timeout" | "error" | "completed";
-    minCandidateScore: number;
-    hits: Array<{ id: string; semanticScore: number }>;
-    candidateCount: number;
-  };
   candidateCount: number;
   injectedSkills: Array<{
     name: string;
     sources?: string[];
     source:
-      | "name-match"
-      | "direct-retrieval"
-      | "intent-matched"
-      | "experience-qmd"
-      | "related-declared"
-      | "experience-associated";
+      "name-match" | "direct-retrieval" | "intent-matched" | "related-declared";
     collections?: SkillCollectionKind[];
     topCollection?: SkillCollectionKind;
   }>;
@@ -114,7 +103,6 @@ export interface SessionState {
   turnKey?: string;
   input?: string;
   matchedSkills?: string[];
-  matchedExperiences?: string[];
   confidence?: number;
   inputSkillDiscovery?: InputSkillDiscovery;
   intent?: IntentState;
@@ -246,6 +234,14 @@ function sanitizeToolParamsForReview(
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
+function hasReviewEvidence(state: SessionState): boolean {
+  return (
+    state.matchedSkills !== undefined ||
+    Boolean(state.intent?.result) ||
+    Boolean(state.skillsUsed?.length)
+  );
+}
+
 function createReviewState(
   state: SessionState,
   options?: {
@@ -259,9 +255,6 @@ function createReviewState(
     input: sanitizeReviewInput(state.input),
     confidence: state.confidence ?? state.intent?.result?.confidence,
     matchedSkills: matchedSkills ? [...matchedSkills] : undefined,
-    matchedExperiences: state.matchedExperiences
-      ? [...state.matchedExperiences]
-      : undefined,
     skillsUsed: state.skillsUsed?.map((skill) => ({ ...skill })),
     toolCalls: state.toolCalls?.map((call) => ({
       name: call.name,
@@ -491,8 +484,6 @@ function mergeSessionState(
   if (data.input !== undefined) current.input = data.input;
   if (data.matchedSkills !== undefined)
     current.matchedSkills = [...data.matchedSkills];
-  if (data.matchedExperiences !== undefined)
-    current.matchedExperiences = [...data.matchedExperiences];
   if (data.confidence !== undefined) current.confidence = data.confidence;
   if (data.inputSkillDiscovery !== undefined)
     current.inputSkillDiscovery = data.inputSkillDiscovery;
@@ -901,7 +892,6 @@ export class SessionTracker {
         if (session.sessionKey !== sessionKey) continue;
         if (
           !session.current?.matchedSkills?.length &&
-          !session.current?.matchedExperiences?.length &&
           !session.current?.intent?.result &&
           !session.current?.input
         ) {
@@ -921,8 +911,7 @@ export class SessionTracker {
       if (
         this.hasIntentData(params.sessionId) ||
         state?.input ||
-        state?.matchedSkills?.length ||
-        state?.matchedExperiences?.length
+        state?.matchedSkills?.length
       ) {
         return params.sessionId;
       }
@@ -932,25 +921,12 @@ export class SessionTracker {
   getReviewSnapshot(sessionId: string): ReviewSnapshot | undefined {
     const session = this.sessionData.get(sessionId);
     const start = session?.current.timestamps?.start;
-    if (
-      !session ||
-      !start ||
-      (session.current.matchedSkills === undefined &&
-        session.current.matchedExperiences === undefined &&
-        !session.current.intent?.result)
-    ) {
-      return;
-    }
+    if (!session || !start || !hasReviewEvidence(session.current)) return;
 
     const completedStates = [
       ...(session.history ?? []),
       session.current,
-    ].filter(
-      (state) =>
-        state.matchedSkills !== undefined ||
-        state.matchedExperiences !== undefined ||
-        state.intent?.result,
-    );
+    ].filter(hasReviewEvidence);
     return {
       sessionId,
       sessionKey: session.sessionKey,
@@ -979,23 +955,16 @@ export class SessionTracker {
     if (matches.length !== 1) return;
     const { state: target, index: targetIndex } = matches[0];
     const eventId = resolveTurnEventId(sessionId, target);
-    if (
-      !target.timestamps?.end ||
-      !eventId ||
-      (target.matchedSkills === undefined &&
-        target.matchedExperiences === undefined &&
-        !target.intent?.result)
-    ) {
+    if (!target.timestamps?.end || !eventId || !hasReviewEvidence(target))
       return;
-    }
     const throughTarget = ordered
       .slice(0, targetIndex + 1)
       .filter(
         (state) =>
           state.input ||
           state.matchedSkills?.length ||
-          state.matchedExperiences?.length ||
-          state.intent?.result,
+          state.intent?.result ||
+          state.skillsUsed?.length,
       );
     return {
       sessionId,

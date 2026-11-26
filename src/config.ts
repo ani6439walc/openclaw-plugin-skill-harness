@@ -16,7 +16,6 @@ import type {
   ResolvedQmdConfig,
   ResolvedReviewConfig,
   ResolvedRoutingConfig,
-  ResolvedRoutingExperiencesConfig,
   ResolvedRoutingScopeConfig,
   ResolvedRoutingSkillsConfig,
   ResolvedScopeConfig,
@@ -61,12 +60,6 @@ const DEFAULT_ROUTING_SCOPE: ResolvedRoutingScopeConfig = {
 };
 const DEFAULT_SCOPE: ResolvedScopeConfig = DEFAULT_ROUTING_SCOPE;
 
-const DEFAULT_ROUTING_EXPERIENCES: ResolvedRoutingExperiencesConfig = {
-  search: { minCandidateScore: 0.4, timeoutMs: undefined as never },
-  relevanceThreshold: 0.6,
-  maxInjectedExperiences: 4,
-};
-
 const DEFAULT_ROUTING_SKILLS: ResolvedRoutingSkillsConfig = {
   related: {
     relevanceThreshold: DEFAULT_RELATION_RELEVANCE_THRESHOLD,
@@ -86,7 +79,6 @@ const DEFAULT_SKILL_CANDIDATES = DEFAULT_ROUTING_SKILLS;
 const DEFAULT_ROUTING: ResolvedRoutingConfig = {
   minTriggerChars: 5,
   scope: DEFAULT_ROUTING_SCOPE,
-  experiences: DEFAULT_ROUTING_EXPERIENCES,
   skills: DEFAULT_ROUTING_SKILLS,
   timeoutMs: DEFAULT_TIMEOUT_MS,
   queryMode: DEFAULT_QUERY_MODE,
@@ -126,8 +118,7 @@ const DEFAULT_REVIEW = {
   thinking: "medium",
   timeoutSeconds: 300,
   triggers: {
-    experienceHealthCheck: { enabled: true, everyTurns: 10 },
-    intentHealthCheck: { enabled: true, everyTurns: 10 },
+    relationHealthCheck: { enabled: true, everyTurns: 10 },
     routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
     capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
   },
@@ -217,43 +208,6 @@ const ThinkLevelSchema = z
   .enum(["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"])
   .catch("medium");
 
-const ExperienceCandidatesSearchSchema = z
-  .object({
-    minCandidateScore: z
-      .number()
-      .finite()
-      .min(0)
-      .max(1)
-      .optional()
-      .default(0.4),
-    timeoutMs: z.number().int().min(100).max(60_000).optional(),
-  })
-  .strict()
-  .optional()
-  .default(DEFAULT_ROUTING_EXPERIENCES.search);
-
-const RoutingExperiencesSchema = z
-  .object({
-    search: ExperienceCandidatesSearchSchema,
-    relevanceThreshold: z
-      .number()
-      .finite()
-      .min(0)
-      .max(1)
-      .optional()
-      .default(0.6),
-    maxInjectedExperiences: z
-      .number()
-      .int()
-      .min(0)
-      .max(20)
-      .optional()
-      .default(4),
-  })
-  .strict()
-  .optional()
-  .default(DEFAULT_ROUTING_EXPERIENCES);
-
 const GenericTokensSchema = z
   .array(z.string())
   .optional()
@@ -323,7 +277,6 @@ const RoutingSchema = z
   .object({
     minTriggerChars: z.number().int().min(1).catch(5),
     scope: ScopeSchema.optional().default(DEFAULT_ROUTING_SCOPE),
-    experiences: RoutingExperiencesSchema,
     skills: RoutingSkillsSchema,
     timeoutMs: boundedInt(DEFAULT_TIMEOUT_MS, 1_000, 60_000),
     queryMode: z.enum(["message", "recent", "full"]).catch(DEFAULT_QUERY_MODE),
@@ -389,16 +342,6 @@ function resolveRoutingConfig(
   const resolved = RoutingSchema.parse(routingInput);
   const out: ResolvedRoutingConfig = {
     ...resolved,
-    experiences: {
-      ...resolved.experiences,
-      search: {
-        ...resolved.experiences.search,
-        timeoutMs:
-          resolved.experiences.search.timeoutMs === undefined
-            ? qmdTimeoutMs
-            : resolved.experiences.search.timeoutMs,
-      },
-    },
     skills: {
       ...resolved.skills,
       search: {
@@ -542,18 +485,13 @@ const ReviewSchema = z
     timeoutSeconds: boundedInt(300, 60, 1_800),
     triggers: z
       .object({
-        experienceHealthCheck: z
+        relationHealthCheck: z
           .object({
             enabled: enabledSchema,
             everyTurns: boundedInt(10, 1, 1_000),
           })
-          .optional(),
-        intentHealthCheck: z
-          .object({
-            enabled: enabledSchema,
-            everyTurns: boundedInt(10, 1, 1_000),
-          })
-          .optional(),
+          .optional()
+          .default(DEFAULT_REVIEW.triggers.relationHealthCheck),
         routingUncertainty: z
           .object({
             enabled: enabledSchema,
@@ -571,21 +509,10 @@ const ReviewSchema = z
           })
           .catch(DEFAULT_REVIEW.triggers.capabilityFit),
       })
-      .catch(DEFAULT_REVIEW.triggers)
-      .transform((val) => {
-        const healthCheck =
-          val.experienceHealthCheck ??
-          val.intentHealthCheck ??
-          DEFAULT_REVIEW.triggers.experienceHealthCheck;
-        return {
-          experienceHealthCheck: healthCheck,
-          intentHealthCheck: healthCheck,
-          routingUncertainty: val.routingUncertainty,
-          capabilityFit: val.capabilityFit,
-        };
-      }),
+      .strict()
+      .optional()
+      .default(DEFAULT_REVIEW.triggers),
   })
-  .catch(DEFAULT_REVIEW)
   .transform((val): ResolvedReviewConfig => ({
     enabled: val.enabled,
     model: val.model ?? undefined,
@@ -593,7 +520,8 @@ const ReviewSchema = z
     thinking: val.thinking,
     timeoutSeconds: val.timeoutSeconds,
     triggers: val.triggers,
-  }));
+  }))
+  .default(DEFAULT_REVIEW);
 
 const SecretRefSchema = z.object({
   source: z.string().optional(),
@@ -643,13 +571,11 @@ const SkillHarnessConfigSchema = z
     qmd: QmdSchema,
     skills: z.unknown().optional(),
     routing: z.unknown().optional(),
-    review: ReviewSchema.optional().default(DEFAULT_REVIEW),
   })
   .catch({
     qmd: DEFAULT_QMD,
     skills: DEFAULT_SKILLS,
     routing: DEFAULT_ROUTING,
-    review: DEFAULT_REVIEW,
   });
 
 export function resolveConfig(
@@ -731,6 +657,6 @@ export function resolveConfig(
     ...(decisionModel ? { decisionModel } : {}),
     skills: resolvedSkills,
     routing: resolvedRouting,
-    review: resolved.review,
+    review: ReviewSchema.parse(rawConfig?.review),
   };
 }

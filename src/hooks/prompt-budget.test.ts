@@ -71,7 +71,6 @@ const event = {
 };
 const selected = {
   skills: ["fixture"],
-  experiences: [],
   confidence: 0.9,
   reason: "relevant",
 };
@@ -102,9 +101,7 @@ function fixture() {
     "---\nname: fixture\ndescription: Fixture skill.\n---\nInstructions.",
   );
   const tracker = SessionTracker.create(root);
-  let config = resolveConfig({
-    routing: { experiences: { maxInjectedExperiences: 0 } },
-  });
+  let config = resolveConfig({});
   const search = vi.fn(async () => []);
   const selector = vi.fn<NonNullable<HookDeps["routingSelector"]>>(
     async () => selected,
@@ -716,7 +713,6 @@ describe("prompt routing deadlines", () => {
     f.setConfig(
       resolveConfig({
         skills: { includeWorkspaceSkills: false, includeWorkshopSkills: false },
-        routing: { experiences: { maxInjectedExperiences: 0 } },
       }),
     );
     const second = await f.handlers.onBeforePromptBuild(event, ctx);
@@ -782,7 +778,6 @@ describe("prompt routing deadlines", () => {
       resolveConfig({
         routing: {
           skills: { maxInjectedSkills: 0 },
-          experiences: { maxInjectedExperiences: 0 },
         },
       }),
     );
@@ -864,8 +859,8 @@ describe("prompt routing deadlines", () => {
     expect(promptRoutingBudgetMs(config.routing)).toBe(21_500);
     config.routing.skills.maxInjectedSkills = 0;
     config.routing.skills.search.timeoutMs = 60_000;
-    expect(promptRoutingBudgetMs(config.routing)).toBe(21_500);
-    config.routing.experiences.search.timeoutMs = 60_000;
+    expect(promptRoutingBudgetMs(config.routing)).toBe(6_500);
+    config.routing.skills.maxInjectedSkills = 1;
     config.routing.timeoutMs = 60_000;
     expect(promptRoutingBudgetMs(config.routing)).toBe(
       MAX_PROMPT_HOOK_TIMEOUT_MS,
@@ -904,7 +899,6 @@ describe("prompt routing deadlines", () => {
     f.setConfig(
       resolveConfig({
         qmd: { timeoutMs: 30_000 },
-        routing: { experiences: { maxInjectedExperiences: 0 } },
       }),
     );
     const search = deferred<[]>([]);

@@ -23,14 +23,11 @@ import {
   resolveSkillRoots,
 } from "./skills/roots.js";
 import { suppressNativeSkillsOnStartup } from "./skills/suppress-native.js";
-import { SkillExperienceCatalog } from "./experiences/index.js";
 import { createSkillQmdIndex } from "./qmd/skill-index.js";
 import { activeAgentIdsFromConfig } from "./qmd/active-agents.js";
-import { createSkillExperienceQmdIndex } from "./qmd/experience-index.js";
 import * as fs from "node:fs";
 import type { ResolvedSkillHarnessPluginConfig } from "./types.js";
 import {
-  experiencesPath,
   resolvePluginDataRoot,
   resolveStateDirFromApi,
   sessionsDirPath,
@@ -49,7 +46,6 @@ export function initializePluginDataRoot({
   try {
     fs.mkdirSync(dataRoot, { recursive: true });
     fs.mkdirSync(sessionsDirPath(dataRoot), { recursive: true });
-    fs.mkdirSync(experiencesPath(dataRoot), { recursive: true });
   } catch (err) {
     logger.warn(
       formatErrorDiagnostic("failed to create skill-harness data root", err),
@@ -139,7 +135,7 @@ export function createPlugin(
     id: PLUGIN_ID,
     name: "Skill Harness",
     description:
-      "Discovers relevant skills and experiences before replies and injects routing context via before_prompt_build hook.",
+      "Discovers relevant skills before replies and injects routing context via before_prompt_build hook.",
     register() {
       const getWorkingSetSkills = createWorkingSetSkillsResolver(
         refreshLiveConfigFromRuntime,
@@ -181,7 +177,6 @@ export function createPlugin(
         return settled;
       };
       const nativeBundledSkillsDir = resolveOpenClawBundledSkillsDir();
-      const experienceCatalog = new SkillExperienceCatalog(dataRoot);
       const activeAgentIds = (): string[] | undefined => {
         try {
           return activeAgentIdsFromConfig(
@@ -202,19 +197,6 @@ export function createPlugin(
           return { qmd: config.qmd, skills: config.skills };
         },
       });
-      const qmdExperienceIndex = createSkillExperienceQmdIndex({
-        dataRoot,
-        readOnly: !ownsBackgroundWork,
-        runInBackgroundContext,
-        getEntries: () => experienceCatalog.listAll(),
-        config: () => {
-          refreshLiveConfigFromRuntime();
-          return config.qmd;
-        },
-      });
-      if (!ownsBackgroundWork) {
-        qmdExperienceIndex.schedule(experienceCatalog.listAll());
-      }
       const tracker = SessionTracker.create(dataRoot);
       const statsAggregator = StatsAggregator.create(dataRoot);
       const reviewLogWriter = new IntentReviewLogWriter(dataRoot);
@@ -281,10 +263,9 @@ export function createPlugin(
         });
       };
 
-      const refreshQmdIndexes = async () => {
+      const refreshSkillIndex = async () => {
         if (disposed || !ownsBackgroundWork) return;
         refreshLiveConfigFromRuntime();
-        qmdExperienceIndex.schedule(experienceCatalog.listAll());
         await Promise.all([
           ...Array.from(collectKnownAgentIds(), (agentId) =>
             scheduleSkillSearchIndex(agentId, true),
@@ -302,7 +283,7 @@ export function createPlugin(
             refreshTimer = undefined;
             return runBackgroundTask(async () => {
               try {
-                await refreshQmdIndexes();
+                await refreshSkillIndex();
               } finally {
                 scheduleQmdIndexRefresh();
               }
@@ -336,10 +317,7 @@ export function createPlugin(
             reviewScheduler.dispose(),
             ...backgroundWork,
           ]);
-          await Promise.all([
-            qmdSkillIndex.close(),
-            qmdExperienceIndex.close(),
-          ]);
+          await qmdSkillIndex.close();
         })();
         return stopping;
       };
@@ -368,7 +346,6 @@ export function createPlugin(
         reviewScheduler,
         getWorkingSetSkills,
         qmdSkillIndex,
-        qmdExperienceIndex,
 
         nativeBundledSkillsDir,
         getSharedRoots: () => config.skills.sharedRoots,
@@ -381,7 +358,7 @@ export function createPlugin(
       if (disposed) void stopPromptWork();
 
       refreshLiveConfigFromRuntime();
-      void runBackgroundTask(refreshQmdIndexes);
+      void runBackgroundTask(refreshSkillIndex);
       scheduleQmdIndexRefresh();
 
       api.on("before_prompt_build", handlers.onBeforePromptBuild, {
@@ -398,8 +375,6 @@ export function createPlugin(
       api.on("gateway_stop", stopBackgroundWork);
       registerSkillTools(api, {
         reviewToolRegistry,
-        experienceCatalog,
-        qmdExperienceIndex,
         qmdSkillIndex,
         scheduleSkillSearchIndex,
         nativeBundledSkillsDir: deps.nativeBundledSkillsDir,

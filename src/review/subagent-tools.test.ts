@@ -208,7 +208,6 @@ async function fixture(
     api,
     config: resolveConfig({}),
     agentId: "main",
-    dataRoot: root,
     modelRef: { provider: "test", model: "review" },
     snapshot: {
       sessionId: "original",

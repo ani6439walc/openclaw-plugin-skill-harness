@@ -8,8 +8,7 @@ export type ResolvedReviewConfig = {
   thinking: ThinkLevel;
   timeoutSeconds: number;
   triggers: {
-    experienceHealthCheck: { enabled: boolean; everyTurns: number };
-    intentHealthCheck?: { enabled: boolean; everyTurns: number };
+    relationHealthCheck: { enabled: boolean; everyTurns: number };
     routingUncertainty: { enabled: boolean; confidenceBelow: number };
     capabilityFit: {
       enabled: boolean;
@@ -44,17 +43,6 @@ export type ResolvedRoutingScopeConfig = {
 
 export type ResolvedScopeConfig = ResolvedRoutingScopeConfig;
 
-export type ResolvedExperienceCandidateSearchConfig = {
-  minCandidateScore: number;
-  timeoutMs: number;
-};
-
-export type ResolvedRoutingExperiencesConfig = {
-  search: ResolvedExperienceCandidateSearchConfig;
-  relevanceThreshold: number;
-  maxInjectedExperiences: number;
-};
-
 export type ResolvedSkillCandidateSearchConfig = {
   minCandidateScore: number;
   timeoutMs: number;
@@ -79,7 +67,6 @@ export type ResolvedSkillCandidatesConfig = ResolvedRoutingSkillsConfig;
 export type RoutingLlmResult = {
   relationDecisions?: import("./skills/related.js").RelationDecision[];
   skills: string[];
-  experiences: string[];
   confidence: number;
   reason: string;
 };
@@ -94,7 +81,6 @@ export type ContextWindow = {
 export type ResolvedRoutingConfig = {
   minTriggerChars: number;
   scope: ResolvedRoutingScopeConfig;
-  experiences: ResolvedRoutingExperiencesConfig;
   skills: ResolvedRoutingSkillsConfig;
   timeoutMs: number;
   queryMode: "message" | "recent" | "full";

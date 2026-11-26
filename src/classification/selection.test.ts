@@ -44,6 +44,17 @@ describe("unified host selection", () => {
       confidence: 0.9,
     });
     expect(f.evaluate).toHaveBeenCalledOnce();
+    const [batch] = f.evaluate.mock.calls[0];
+    expect(Object.keys(batch.questions)).toEqual(["skill_review"]);
+    expect(batch.state.skill_candidates).toEqual([
+      {
+        name: "review",
+        description: "Review changes",
+        sources: [],
+        relation_ids: [],
+      },
+    ]);
+    expect(batch.state).not.toHaveProperty("experience_candidates");
     expect(f.systemOne).not.toHaveBeenCalled();
   });
 
@@ -51,7 +62,7 @@ describe("unified host selection", () => {
     const f = fixture();
     expect(
       await runJevUnifiedRouting({ ...f.params, candidateSkills: [] }),
-    ).toMatchObject({ skills: [], experiences: [], confidence: 0 });
+    ).toMatchObject({ skills: [], confidence: 0 });
     expect(f.evaluate).not.toHaveBeenCalled();
     expect(f.systemOne).not.toHaveBeenCalled();
   });

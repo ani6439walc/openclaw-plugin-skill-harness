@@ -1,7 +1,3 @@
-import type {
-  RelatedCandidateEvidence,
-  RelationEvidence,
-} from "../skills/related.js";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
 import type { JsonValue as VendorJsonValue } from "@typesafe-ai/sdk";
 import type { JsonValue } from "openclaw/plugin-sdk/decisions";
@@ -10,34 +6,24 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { logger } from "../../api.js";
 import { normalizeTypeSafeBaseUrl } from "../qmd/provider-resolver.js";
 import type {
-  AvailableSkill,
-  RecentTurn,
   ResolvedSkillHarnessPluginConfig,
   RoutingLlmResult,
 } from "../types.js";
-import type { SkillExperienceEntry } from "../experiences/types.js";
 
 import {
+  type SelectionInput,
   buildSelectionBatch,
   parseSelectionResult,
 } from "./selection-batch.js";
-export type JevUnifiedRoutingParams = {
+export type JevUnifiedRoutingParams = SelectionInput & {
   api: OpenClawPluginApi;
   config: ResolvedSkillHarnessPluginConfig;
   agentId: string;
   sessionKey?: string;
   sessionId?: string;
-  conversation?: RecentTurn[];
-  latest: string;
   messageProvider?: string;
   channelId?: string;
   modelRef?: { provider: string; model: string };
-  candidateSkills?: readonly AvailableSkill[];
-  candidateSources?: Readonly<Record<string, readonly string[]>>;
-  visibleSkillNames?: readonly string[];
-  relatedEvidence?: readonly RelatedCandidateEvidence[];
-  relationEvidence?: readonly RelationEvidence[];
-  candidateExperiences?: readonly SkillExperienceEntry[];
   client?: TypeSafeClient;
   dataRoot?: string;
   signal?: AbortSignal;

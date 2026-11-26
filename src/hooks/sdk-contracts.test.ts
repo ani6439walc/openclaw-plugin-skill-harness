@@ -51,18 +51,15 @@ function promptHarness(configInput: Record<string, unknown> = {}) {
     mergeTurnAndPersist: vi.fn(async () => "applied"),
   };
   const skillSearch = vi.fn(async () => []);
-  const experienceSearch = vi.fn(async () => []);
   const selector = vi.fn();
   return {
     tracker,
     skillSearch,
-    experienceSearch,
     selector,
     handlers: createHandlers({
       config: () => resolveConfig(configInput),
       tracker: tracker as never,
       qmdSkillIndex: { search: skillSearch } as never,
-      qmdExperienceIndex: { search: experienceSearch } as never,
       routingSelector: selector,
     }),
   };
@@ -97,7 +94,6 @@ describe("SDK current request contract", () => {
         expected ? 1 : 0,
       );
       expect(h.skillSearch).toHaveBeenCalledTimes(expected ? 1 : 0);
-      expect(h.experienceSearch).toHaveBeenCalledTimes(expected ? 1 : 0);
       if (!expected) expect(h.selector).not.toHaveBeenCalled();
     },
   );
@@ -123,11 +119,9 @@ describe("SDK current request contract", () => {
     expect(h.tracker.preparePromptTurn.mock.calls[0][0]).not.toHaveProperty(
       "runId",
     );
-    for (const search of [h.skillSearch, h.experienceSearch]) {
-      expect(search).toHaveBeenCalledWith(
-        expect.objectContaining({ query: "What is two plus two?" }),
-      );
-    }
+    expect(h.skillSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "What is two plus two?" }),
+    );
   });
 
   it("preserves literal assembled-context markers in the explicit user request", async () => {
@@ -170,7 +164,6 @@ describe("SDK current request contract", () => {
       expect(result?.prependContext).toBeUndefined();
       expect(h.tracker.preparePromptTurn).not.toHaveBeenCalled();
       expect(h.skillSearch).not.toHaveBeenCalled();
-      expect(h.experienceSearch).not.toHaveBeenCalled();
       expect(h.selector).not.toHaveBeenCalled();
     },
   );

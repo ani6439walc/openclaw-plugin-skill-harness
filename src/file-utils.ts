@@ -51,10 +51,6 @@ export function resolvePluginDataRoot(
   return path.join(stateDir, "plugins", pluginId);
 }
 
-export function experiencesPath(dataRoot: string): string {
-  return path.join(dataRoot, "experiences");
-}
-
 export function sessionsDirPath(dataRoot: string): string {
   return path.join(dataRoot, "sessions");
 }

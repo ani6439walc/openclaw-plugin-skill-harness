@@ -18,9 +18,7 @@ import type {
 } from "../classification/index.js";
 import type { RoutingLlmResult } from "../types.js";
 import type { resolveSkillInventory } from "../skills/indexer.js";
-import type { SkillExperienceCatalog } from "../experiences/index.js";
 import type { SkillQmdIndex } from "../qmd/skill-index.js";
-import type { SkillExperienceQmdIndex } from "../qmd/experience-index.js";
 import type { ToolFallbackRegistry } from "./tool-fallback-registry.js";
 import type {
   TurnAssociation,
@@ -132,9 +130,7 @@ export type HookDeps = {
   skillInventoryResolver?: typeof resolveSkillInventory;
   reviewSkillResolver?: typeof import("../skills/indexer.js").listAvailableSkills;
   clock?: () => Date;
-  experienceCatalog?: SkillExperienceCatalog;
   qmdSkillIndex?: SkillQmdIndex;
-  qmdExperienceIndex?: SkillExperienceQmdIndex;
   reviewScheduler?: IntentReviewScheduler | ReviewSchedulerLike;
   reviewToolRegistry?: ReviewToolRegistry;
   loadReviewSubagent?: () => Promise<
@@ -153,13 +149,11 @@ export type HookDeps = {
     params: JevUnifiedRoutingParams,
   ) => Promise<RoutingLlmResult | undefined>;
   classifier?: (params: unknown) => Promise<RoutingLlmResult | undefined>;
-  reviewLogWriter?: Pick<IntentReviewLogWriter, "record"> &
-    Partial<
-      Pick<
-        IntentReviewLogWriter,
-        "completedSkillEpochKeys" | "relationInspectionOffset"
-      >
-    >;
+  reviewLogWriter?: Pick<
+    IntentReviewLogWriter,
+    "record" | "inspectionOffsetsForEvent"
+  > &
+    Partial<Pick<IntentReviewLogWriter, "completedSkillEpochKeys">>;
   getWorkingSetSkills?: (agentId: string) => string[] | Promise<string[]>;
 
   bundledSkillsDir?: string;

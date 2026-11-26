@@ -4,7 +4,6 @@ import type { OpenClawPluginApi } from "../../api.js";
 import { resolveConfig as resolveBaseConfig } from "../config.js";
 import { runJevUnifiedRouting } from "./jev-client.js";
 import type { AvailableSkill } from "../types.js";
-import type { SkillExperienceEntry } from "../experiences/types.js";
 
 function resolveConfig(raw: Record<string, unknown>) {
   return resolveBaseConfig({
@@ -82,7 +81,6 @@ describe("runJevUnifiedRouting", () => {
 
     expect(result).toEqual({
       skills: ["git-tools"],
-      experiences: [],
       confidence: 0.85,
       reason: "decision → 1 skill: [git-tools]",
     });
@@ -287,20 +285,11 @@ describe("runJevUnifiedRouting", () => {
     expect(systemOne).toHaveBeenCalledOnce();
   });
 
-  it("indexes candidate discovery sources, experience IDs and relations without exposing hidden associations", async () => {
-    const experience: SkillExperienceEntry = {
-      id: "git-review",
-      skills: ["git-tools", "hidden"],
-      summary: "Review repository state",
-      keywords: ["review"],
-      body: "Private full body",
-      path: "/private/experience",
-    };
+  it("indexes skill discovery sources and visible relation evidence", async () => {
     const systemOne = vi.fn().mockResolvedValue({
       answers: {
         "skill_git-tools": { type: "noul", noul: 0.2 },
         "skill_markdown-formatter": { type: "noul", noul: 0.9 },
-        "exp_git-review": { type: "noul", noul: 0.95 },
         relation_0: { type: "noul", noul: 0.9 },
       },
     });
@@ -312,10 +301,9 @@ describe("runJevUnifiedRouting", () => {
       modelRef: { provider: "typesafe", model: "jev-latest" },
       candidateSkills,
       candidateSources: {
-        "git-tools": ["experience-associated"],
-        "markdown-formatter": ["qmd", "name"],
+        "git-tools": ["related-declared"],
+        "markdown-formatter": ["direct-retrieval", "name-match"],
       },
-      candidateExperiences: [experience],
       relationEvidence: [relationEvidence],
       client: { systemOne } as unknown as TypeSafeClient,
     });
@@ -325,70 +313,26 @@ describe("runJevUnifiedRouting", () => {
       {
         name: "git-tools",
         description: candidateSkills[0].description,
-        sources: ["experience-associated"],
-        experience_ids: ["git-review"],
+        sources: ["related-declared"],
         relation_ids: ["relation_0"],
       },
       {
         name: "markdown-formatter",
         description: candidateSkills[1].description,
-        sources: ["qmd", "name"],
-        experience_ids: [],
+        sources: ["direct-retrieval", "name-match"],
         relation_ids: [],
-      },
-    ]);
-    expect(input.state.experience_candidates).toEqual([
-      {
-        id: "git-review",
-        summary: experience.summary,
-        visible_associated_skills: ["git-tools"],
       },
     ]);
     expect(input.state.skill_relation_evidence).toEqual([
       { id: "relation_0", ...relationEvidence },
     ]);
-    expect(JSON.stringify(input.state)).not.toContain("Private full body");
-    expect(input.questions).not.toHaveProperty("skill_hidden");
-    expect(result?.skills).toEqual(["markdown-formatter"]);
-    expect(result?.experiences).toEqual(["git-review"]);
-  });
-
-  it("preserves visible experience associations in experiences-only routing without creating skill questions", async () => {
-    const experience: SkillExperienceEntry = {
-      id: "git-review",
-      skills: ["git-tools", "hidden"],
-      summary: "Review repository state",
-      keywords: ["review"],
-      body: "Private body",
-      path: "/private/experience",
-    };
-    const systemOne = vi.fn().mockResolvedValue({
-      answers: {
-        "exp_git-review": { type: "noul", noul: 0.95 },
-      },
-    });
-    const result = await runJevUnifiedRouting({
-      api: dummyApi,
-      config: resolveConfig({ routing: { skills: { maxInjectedSkills: 0 } } }),
-      agentId: "main",
-      latest: "review repository",
-      modelRef: { provider: "typesafe", model: "jev-latest" },
-      candidateSkills: [],
-      visibleSkillNames: ["git-tools"],
-      candidateExperiences: [experience],
-      client: { systemOne } as unknown as TypeSafeClient,
-    });
-    const input = systemOne.mock.calls[0][0];
-    expect(input.state.experience_candidates).toEqual([
-      {
-        id: "git-review",
-        summary: experience.summary,
-        visible_associated_skills: ["git-tools"],
-      },
+    expect(Object.keys(input.questions).sort()).toEqual([
+      "relation_0",
+      "skill_git-tools",
+      "skill_markdown-formatter",
     ]);
-    expect(Object.keys(input.questions)).toEqual(["exp_git-review"]);
-    expect(result?.skills).toEqual([]);
-    expect(result?.experiences).toEqual(["git-review"]);
+    expect(input.state).not.toHaveProperty("experience_candidates");
+    expect(result?.skills).toEqual(["markdown-formatter"]);
   });
 
   it("uses canonical name as the stable tie break for equal directly scored skills", async () => {
@@ -411,7 +355,7 @@ describe("runJevUnifiedRouting", () => {
     expect(result?.skills).toEqual(["git-tools", "markdown-formatter"]);
   });
 
-  it("breaks equal skill and experience scores by locale-independent string order", async () => {
+  it("breaks equal skill scores by locale-independent string order", async () => {
     for (const names of [
       ["ä", "z", "Z"],
       ["Z", "z", "ä"],
@@ -421,39 +365,25 @@ describe("runJevUnifiedRouting", () => {
         description: name,
         location: `/${name}`,
       }));
-      const experiences: SkillExperienceEntry[] = names.map((id) => ({
-        id,
-        summary: id,
-        skills: [],
-        keywords: [],
-        body: "",
-        path: `/experiences/${id}`,
-      }));
       const answers = Object.fromEntries(
-        names.flatMap((name) => [
-          [`skill_${name}`, { type: "noul", noul: 0.9 }],
-          [`exp_${name}`, { type: "noul", noul: 0.9 }],
-        ]),
+        names.map((name) => [`skill_${name}`, { type: "noul", noul: 0.9 }]),
       );
       const result = await runJevUnifiedRouting({
         api: dummyApi,
         config: resolveConfig({
           routing: {
             skills: { maxInjectedSkills: 2 },
-            experiences: { maxInjectedExperiences: 2 },
           },
         }),
         agentId: "main",
         latest: "review documentation",
         modelRef: { provider: "typesafe", model: "jev-latest" },
         candidateSkills: skills,
-        candidateExperiences: experiences,
         client: {
           systemOne: vi.fn().mockResolvedValue({ answers }),
         } as unknown as TypeSafeClient,
       });
       expect(result?.skills).toEqual(["Z", "z"]);
-      expect(result?.experiences).toEqual(["Z", "z"]);
     }
   });
 
@@ -510,14 +440,12 @@ describe("runJevUnifiedRouting", () => {
       latest: "empty candidates",
       modelRef: { provider: "typesafe", model: "jev-latest" },
       candidateSkills: [],
-      candidateExperiences: [],
       client: mockClient,
     });
 
     expect(mockSystemOne).not.toHaveBeenCalled();
     expect(result).toEqual({
       skills: [],
-      experiences: [],
       confidence: 0.0,
       reason: "decision → no candidate questions to evaluate",
     });
@@ -684,55 +612,5 @@ describe("runJevUnifiedRouting", () => {
       }),
     ).toBeUndefined();
     expect(systemOne).toHaveBeenCalledOnce();
-  });
-
-  it("scores associated skills independently instead of automatically selecting them with an experience", async () => {
-    const mockSystemOne = vi.fn().mockResolvedValue({
-      model: "typesafe/jev-latest",
-      usage: { input_tokens: 30, output_tokens: 15 },
-      answers: {
-        "skill_git-tools": { type: "noul", noul: 0.2 },
-        "skill_markdown-formatter": { type: "noul", noul: 0.8 },
-        "exp_git-merge-conflict": { type: "noul", noul: 0.95 },
-        "exp_unused-exp": { type: "noul", noul: 0.1 },
-      },
-    });
-
-    const candidateExperiences: SkillExperienceEntry[] = [
-      {
-        id: "git-merge-conflict",
-        skills: ["git-tools"],
-        summary: "Resolve complex 3-way git merge conflicts.",
-        keywords: ["merge", "conflict"],
-        body: "Merge conflict steps",
-        path: "/mock/exp1",
-      },
-      {
-        id: "unused-exp",
-        skills: ["other-skill"],
-        summary: "Unused procedure",
-        keywords: ["unused"],
-        body: "Unused",
-        path: "/mock/exp2",
-      },
-    ];
-
-    const result = await runJevUnifiedRouting({
-      api: dummyApi,
-      config: resolveConfig({}),
-      agentId: "main",
-      latest: "fix my merge conflict and format docs",
-      modelRef: { provider: "typesafe", model: "jev-latest" },
-      candidateSkills,
-      candidateExperiences,
-      client: { systemOne: mockSystemOne } as unknown as TypeSafeClient,
-    });
-
-    expect(result).toBeDefined();
-    expect(result?.experiences).toEqual(["git-merge-conflict"]);
-    expect(result?.skills).toContain("markdown-formatter");
-    expect(result?.skills).not.toContain("git-tools");
-    expect(result?.confidence).toBe(0.95);
-    expect(result?.reason).toContain("git-merge-conflict");
   });
 });

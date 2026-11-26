@@ -32,16 +32,17 @@ vi.mock("openclaw/plugin-sdk/plugin-config-runtime", () => {
   throw new Error("plugin-config-runtime is no longer available");
 });
 
-const {
-  createHookHandlersSpy,
-  createSkillIndexSpy,
-  createExperienceIndexSpy,
-  registerSkillToolsSpy,
-} = vi.hoisted(() => ({
-  createHookHandlersSpy: vi.fn(),
-  createSkillIndexSpy: vi.fn(),
-  createExperienceIndexSpy: vi.fn(),
-  registerSkillToolsSpy: vi.fn(),
+const { createHookHandlersSpy, createSkillIndexSpy, registerSkillToolsSpy } =
+  vi.hoisted(() => ({
+    createHookHandlersSpy: vi.fn(),
+    createSkillIndexSpy: vi.fn(),
+    registerSkillToolsSpy: vi.fn(),
+  }));
+
+// Expose configurable module exports so the retirement regression can observe
+// synchronous filesystem access through named imports as well as fs.promises.
+vi.mock("node:fs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs")>()),
 }));
 
 vi.mock("./skills/index.js", async (importOriginal) => {
@@ -83,30 +84,16 @@ vi.mock("./qmd/skill-index.js", async (importOriginal) => {
   };
 });
 
-vi.mock("./qmd/experience-index.js", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("./qmd/experience-index.js")>();
-  return {
-    ...actual,
-    createSkillExperienceQmdIndex: (
-      ...args: Parameters<typeof actual.createSkillExperienceQmdIndex>
-    ) => {
-      createExperienceIndexSpy(args[0]);
-      return actual.createSkillExperienceQmdIndex(...args);
-    },
-  };
-});
-
 describe("createPlugin", () => {
   let stateDir: string;
   const disposers = new Set<() => void | Promise<void>>();
 
   beforeEach(() => {
     stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-state-"));
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
     createHookHandlersSpy.mockReset();
     registerSkillToolsSpy.mockReset();
     createSkillIndexSpy.mockReset();
-    createExperienceIndexSpy.mockReset();
   });
 
   afterEach(async () => {
@@ -124,6 +111,7 @@ describe("createPlugin", () => {
     } finally {
       fs.rmSync(stateDir, { recursive: true, force: true });
       vi.restoreAllMocks();
+      vi.unstubAllEnvs();
       vi.useRealTimers();
     }
   });
@@ -194,7 +182,7 @@ describe("createPlugin", () => {
           ? options?.name
           : tool.name,
       ),
-    ).toEqual(["skill_list", "skill_search", "skill_view", "skill_experience"]);
+    ).toEqual(["skill_list", "skill_search", "skill_view"]);
   });
 
   it("registers the built-entry contract and releases its discovery resources", async () => {
@@ -207,7 +195,7 @@ describe("createPlugin", () => {
     expect(api.on).toHaveBeenCalledTimes(9);
     expect(
       api.registerTool.mock.calls.map(([, options]) => options.name),
-    ).toEqual(["skill_list", "skill_search", "skill_view", "skill_experience"]);
+    ).toEqual(["skill_list", "skill_search", "skill_view"]);
     const deps = createHookHandlersSpy.mock.calls[0][0];
     const close = vi.spyOn(deps.qmdSkillIndex, "close");
     await onDispose.mock.calls[0][0]();
@@ -280,11 +268,9 @@ describe("createPlugin", () => {
     createPlugin(api).register(api);
     const deps = createHookHandlersSpy.mock.calls[0][0];
     const closeSkills = vi.spyOn(deps.qmdSkillIndex, "close");
-    const closeExperiences = vi.spyOn(deps.qmdExperienceIndex, "close");
     expect(onDispose).toHaveBeenCalledOnce();
     await onDispose.mock.calls[0][0]();
     expect(closeSkills).toHaveBeenCalledOnce();
-    expect(closeExperiences).toHaveBeenCalledOnce();
   });
 
   it("disposes failed QMD workers and their retries through fixture teardown", async ({
@@ -299,9 +285,6 @@ describe("createPlugin", () => {
       throw new Error("fixture index failure");
     });
     createSkillIndexSpy.mockImplementation((params) => {
-      params.createStore = rejectStore;
-    });
-    createExperienceIndexSpy.mockImplementation((params) => {
       params.createStore = rejectStore;
     });
     const api = createApi({
@@ -321,19 +304,16 @@ describe("createPlugin", () => {
       },
     });
     createPlugin(api).register(api);
-    const { qmdSkillIndex, qmdExperienceIndex } =
-      createHookHandlersSpy.mock.calls[0][0];
+    const { qmdSkillIndex } = createHookHandlersSpy.mock.calls[0][0];
     await vi.waitFor(() => {
       expect(qmdSkillIndex.getStatus("main")).toBe("failed");
-      expect(qmdExperienceIndex.getStatus()).toBe("failed");
     });
     expect(rejectStore).toHaveBeenCalled();
     expect(vi.getTimerCount()).toBeGreaterThan(0);
 
-    // Deliberately leave both failed workers to the fixture's afterEach cleanup.
+    // Deliberately leave the failed worker to the fixture's afterEach cleanup.
     onTestFinished(() => {
       expect(qmdSkillIndex.getStatus("main")).toBe("idle");
-      expect(qmdExperienceIndex.getStatus()).toBe("idle");
     });
   });
 
@@ -354,11 +334,9 @@ describe("createPlugin", () => {
       getStatus: vi.fn(async () => ({ needsEmbedding: 0 })),
       close: vi.fn(async () => {}),
     }));
-    for (const spy of [createSkillIndexSpy, createExperienceIndexSpy]) {
-      spy.mockImplementation((params) => {
-        params.createStore = createStore;
-      });
-    }
+    createSkillIndexSpy.mockImplementation((params) => {
+      params.createStore = createStore;
+    });
     const api = createApi({
       pluginConfig: {
         qmd: {
@@ -376,12 +354,10 @@ describe("createPlugin", () => {
       },
     });
     createPlugin(api).register(api);
-    const { qmdSkillIndex, qmdExperienceIndex } =
-      createHookHandlersSpy.mock.calls[0][0];
+    const { qmdSkillIndex } = createHookHandlersSpy.mock.calls[0][0];
     const closeSkills = vi.spyOn(qmdSkillIndex, "close");
-    const closeExperiences = vi.spyOn(qmdExperienceIndex, "close");
     try {
-      await vi.waitFor(() => expect(embed).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(embed).toHaveBeenCalledOnce());
       const stop = api.on.mock.calls.find(
         ([name]) => name === "gateway_stop",
       )![1] as () => Promise<void>;
@@ -391,14 +367,13 @@ describe("createPlugin", () => {
       });
       await vi.waitFor(() => {
         expect(closeSkills).toHaveBeenCalledOnce();
-        expect(closeExperiences).toHaveBeenCalledOnce();
       });
       expect(stopped).toBe(false);
       rejectBuild(new Error("fixture build failed during shutdown"));
       await stopping;
       expect(vi.getTimerCount()).toBe(0);
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(createStore).toHaveBeenCalledTimes(2);
+      expect(createStore).toHaveBeenCalledOnce();
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       rejectBuild(new Error("fixture cleanup"));
@@ -460,16 +435,12 @@ describe("createPlugin", () => {
     ).toBe(true);
     schedule.mockClear();
     registry = "replacement";
-    for (const parameters of [
-      createSkillIndexSpy.mock.calls[0]![0],
-      createExperienceIndexSpy.mock.calls[0]![0],
-    ]) {
-      expect(
-        context.run({ request: "expired", registry: "request" }, () =>
-          parameters.runInBackgroundContext(() => context.getStore()),
-        ),
-      ).toEqual({ registry: "replacement" });
-    }
+    const parameters = createSkillIndexSpy.mock.calls[0]![0];
+    expect(
+      context.run({ request: "expired", registry: "request" }, () =>
+        parameters.runInBackgroundContext(() => context.getStore()),
+      ),
+    ).toEqual({ registry: "replacement" });
     blockDiscovery = true;
     const timerCallIndex = timers.mock.calls.findIndex(
       ([, delay]) => delay === 300_000,
@@ -570,7 +541,6 @@ describe("createPlugin", () => {
       const api = createApi({ registrationMode });
       createPlugin(api).register(api);
       const deps = createHookHandlersSpy.mock.calls[0][0];
-      await deps.qmdExperienceIndex.close();
       await deps.qmdSkillIndex.close();
     },
   );
@@ -610,7 +580,7 @@ describe("createPlugin", () => {
           ? options?.name
           : tool.name,
       ),
-    ).toEqual(["skill_list", "skill_search", "skill_view", "skill_experience"]);
+    ).toEqual(["skill_list", "skill_search", "skill_view"]);
     expect(api.registerCommand).not.toHaveBeenCalled();
   });
 
@@ -636,7 +606,7 @@ describe("createPlugin", () => {
 
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     expect(fs.existsSync(path.join(dataRoot, "sessions"))).toBe(true);
-    expect(fs.existsSync(path.join(dataRoot, "experiences"))).toBe(true);
+    expect(fs.existsSync(path.join(dataRoot, "experiences"))).toBe(false);
     expect(fs.existsSync(path.join(dataRoot, "sessions", "stats.json"))).toBe(
       false,
     );
@@ -700,30 +670,21 @@ describe("createPlugin", () => {
         await gate;
         return {
           skills: ["fixture"],
-          experiences: [],
           confidence: 0.9,
           reason: "fixture",
         };
       });
       const closeSkills = vi.fn(async () => {});
-      const closeExperiences = vi.fn(async () => {});
       createHookHandlersSpy.mockImplementation((deps) => {
         deps.routingSelector = selector;
         vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(() => {});
         vi.spyOn(deps.qmdSkillIndex, "search").mockResolvedValue([]);
         vi.spyOn(deps.qmdSkillIndex, "close").mockImplementation(closeSkills);
         deps.qmdSkillIndex.maintenance = vi.fn().mockResolvedValue(undefined);
-        vi.spyOn(deps.qmdExperienceIndex, "schedule").mockImplementation(
-          () => {},
-        );
-        vi.spyOn(deps.qmdExperienceIndex, "close").mockImplementation(
-          closeExperiences,
-        );
       });
       const onDispose = vi.fn();
       const api = createApi({
         pluginConfig: {
-          routing: { experiences: { maxInjectedExperiences: 0 } },
           qmd: { indexRefreshIntervalSeconds: 0 },
         },
         lifecycle: { onDispose, registerRuntimeLifecycle: vi.fn() },
@@ -756,7 +717,6 @@ describe("createPlugin", () => {
         expect(params.signal?.aborted).toBe(true);
         await Promise.resolve();
         expect(closeSkills).not.toHaveBeenCalled();
-        expect(closeExperiences).not.toHaveBeenCalled();
         expect((await pending)?.prependContext).toBeUndefined();
         expect(
           (await prompt(event, { ...ctx, runId: "next" }))?.prependContext,
@@ -765,41 +725,57 @@ describe("createPlugin", () => {
         release();
         await stopping;
         expect(closeSkills).toHaveBeenCalledTimes(1);
-        expect(closeExperiences).toHaveBeenCalledTimes(1);
       } finally {
         release();
       }
     },
   );
 
-  it("refreshes QMD sources only on the configured polling interval", async () => {
-    vi.useFakeTimers();
-    let schedule: any;
-    createHookHandlersSpy.mockImplementation((deps) => {
-      schedule = vi.spyOn(deps.qmdExperienceIndex, "schedule");
-    });
-    const api = createApi({
-      pluginConfig: { qmd: { indexRefreshIntervalSeconds: 300 } },
-    });
-    createPlugin(api).register(api);
-
-    expect(schedule).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(299_999);
-    expect(schedule).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(1);
-    expect(schedule).toHaveBeenCalledTimes(2);
-    createHookHandlersSpy.mockReset();
-  });
-
   it.each(["full", "discovery", "tool-discovery", "cli-metadata"] as const)(
-    "runs orphan maintenance only for full registration (%s)",
+    "leaves retired data untouched during %s registration, refresh and disposal",
     async (registrationMode) => {
       vi.useFakeTimers();
-      const maintenance = vi.fn().mockResolvedValue(undefined);
+      const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+      const retiredRoots = [
+        path.join(dataRoot, "experiences"),
+        path.join(dataRoot, "qmd", "experiences"),
+      ];
+      for (const root of retiredRoots) {
+        fs.mkdirSync(root, { recursive: true });
+        fs.writeFileSync(path.join(root, "sentinel"), "preserved");
+      }
+      const syncMethods = [
+        "existsSync",
+        "lstatSync",
+        "statSync",
+        "realpathSync",
+        "readdirSync",
+        "mkdirSync",
+        "readFileSync",
+        "writeFileSync",
+        "rmSync",
+        "renameSync",
+      ] as const;
+      const asyncMethods = [
+        "access",
+        "lstat",
+        "stat",
+        "realpath",
+        "readdir",
+        "mkdir",
+        "open",
+        "readFile",
+        "writeFile",
+        "rm",
+        "rename",
+      ] as const;
+      const probes = [
+        ...syncMethods.map((method) => vi.spyOn(fs, method)),
+        ...asyncMethods.map((method) => vi.spyOn(fs.promises, method)),
+      ];
+      let maintenance: ReturnType<typeof vi.spyOn>;
       createHookHandlersSpy.mockImplementation((deps) => {
-        deps.qmdSkillIndex.maintenance = maintenance;
+        maintenance = vi.spyOn(deps.qmdSkillIndex, "maintenance");
         vi.spyOn(deps.qmdSkillIndex, "schedule").mockImplementation(() => {});
       });
       const onDispose = vi.fn();
@@ -812,14 +788,43 @@ describe("createPlugin", () => {
       expect(createSkillIndexSpy.mock.calls[0][0].readOnly).toBe(
         registrationMode !== "full",
       );
+      expect(
+        api.registerTool.mock.calls.map(([, options]) => options.name),
+      ).toEqual(["skill_list", "skill_search", "skill_view"]);
       expect(maintenance).toHaveBeenCalledTimes(
         registrationMode === "full" ? 1 : 0,
       );
-      await vi.advanceTimersByTimeAsync(300_000);
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(maintenance).toHaveBeenCalledTimes(
+        registrationMode === "full" ? 1 : 0,
+      );
+      await vi.advanceTimersByTimeAsync(1);
       expect(maintenance).toHaveBeenCalledTimes(
         registrationMode === "full" ? 2 : 0,
       );
       await onDispose.mock.calls[0][0]();
+
+      expect(fs.mkdirSync).toHaveBeenCalledWith(
+        path.join(dataRoot, "sessions"),
+        { recursive: true },
+      );
+      for (const probe of probes) {
+        const accesses = probe.mock.calls
+          .flat()
+          .filter(
+            (arg) =>
+              typeof arg === "string" &&
+              retiredRoots.some(
+                (root) => arg === root || arg.startsWith(root + path.sep),
+              ),
+          );
+        expect(accesses).toEqual([]);
+      }
+      for (const root of retiredRoots) {
+        expect(fs.readFileSync(path.join(root, "sentinel"), "utf8")).toBe(
+          "preserved",
+        );
+      }
     },
   );
 
@@ -1019,8 +1024,7 @@ describe("createPlugin", () => {
     const dataRoot = path.join(stateDir, "plugins", "skill-harness");
     initializePluginDataRoot({ dataRoot });
     expect(fs.existsSync(path.join(dataRoot, "sessions"))).toBe(true);
-    expect(fs.existsSync(path.join(dataRoot, "experiences"))).toBe(true);
-    expect(fs.readdirSync(path.join(dataRoot, "experiences"))).toEqual([]);
+    expect(fs.existsSync(path.join(dataRoot, "experiences"))).toBe(false);
   });
 
   it("does not copy legacy package sessions after migration is complete", () => {

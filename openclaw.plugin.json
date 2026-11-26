@@ -1,12 +1,12 @@
 {
   "id": "skill-harness",
   "name": "Skill Harness",
-  "description": "Discovers relevant skills and experiences before replies and injects routing context via before_prompt_build hook.",
+  "description": "Discovers relevant skills before replies and injects routing context via before_prompt_build hook.",
   "activation": {
     "onStartup": true
   },
   "contracts": {
-    "tools": ["skill_list", "skill_search", "skill_view", "skill_experience"]
+    "tools": ["skill_list", "skill_search", "skill_view"]
   },
   "configSchema": {
     "type": "object",
@@ -15,7 +15,7 @@
     "properties": {
       "qmd": {
         "type": "object",
-        "description": "Required QMD remote services for skill and experience search. Embedding supports native Voyage or OpenAI-compatible endpoints; services accept optional direct API keys.",
+        "description": "Required QMD remote services for skill search. Embedding supports native Voyage or OpenAI-compatible endpoints; services accept optional direct API keys.",
         "additionalProperties": false,
         "properties": {
           "timeoutMs": {
@@ -28,7 +28,7 @@
             "type": "string",
             "minLength": 1,
             "pattern": "\\S",
-            "description": "Optional shared document embedding cache directory for all skill and experience stores, including other processes using the same directory. Supports disk or tmpfs; omitted uses memory cache only. Absolute paths are recommended; relative paths resolve from process cwd, not dataRoot."
+            "description": "Optional shared document embedding cache directory for all skill stores, including other processes using the same directory. Supports disk or tmpfs; omitted uses memory cache only. Absolute paths are recommended; relative paths resolve from process cwd, not dataRoot."
           },
           "embedding": {
             "type": "object",
@@ -119,7 +119,7 @@
             "minimum": 0,
             "maximum": 86400,
             "default": 300,
-            "description": "Seconds between source checks for qmd experience and skill index refreshes; 0 disables subsequent automatic checks."
+            "description": "Seconds between source checks for QMD skill index refreshes; 0 disables subsequent automatic checks."
           },
           "jev": {
             "type": "object",
@@ -313,7 +313,7 @@
             "type": "integer",
             "minimum": 1,
             "default": 5,
-            "description": "Minimum trimmed current request length in UTF-16 code units for automatic skill and experience routing, before adding conversation context. Static working-set guidance and manual tools remain available."
+            "description": "Minimum trimmed current request length in UTF-16 code units for automatic skill routing, before adding conversation context. Static working-set guidance and manual tools remain available."
           },
           "scope": {
             "type": "object",
@@ -352,49 +352,6 @@
                 },
                 "description": "Deny-list of chat IDs for dynamic routing.",
                 "default": []
-              }
-            },
-            "default": {}
-          },
-          "experiences": {
-            "type": "object",
-            "description": "Prompt-build input-matched experience candidate policy.",
-            "additionalProperties": false,
-            "properties": {
-              "search": {
-                "type": "object",
-                "additionalProperties": false,
-                "description": "Direct SkillExperience retrieval used only while building prompt candidates.",
-                "properties": {
-                  "minCandidateScore": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1,
-                    "default": 0.4,
-                    "description": "Inclusive semantic-evidence score required for a retrieved experience to enter the candidate pool."
-                  },
-                  "timeoutMs": {
-                    "type": "integer",
-                    "minimum": 100,
-                    "maximum": 60000,
-                    "description": "Optional millisecond override for prompt-build experience retrieval. Defaults to qmd.timeoutMs."
-                  }
-                },
-                "default": {}
-              },
-              "relevanceThreshold": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "default": 0.6,
-                "description": "Inclusive relevance threshold for candidate experience selection."
-              },
-              "maxInjectedExperiences": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 20,
-                "default": 4,
-                "description": "Maximum input-matched experiences injected into advisory context."
               }
             },
             "default": {}
@@ -547,7 +504,7 @@
       },
       "review": {
         "type": "object",
-        "description": "Optional asynchronous post-turn Review. It evaluates turns and maintains experiences but never participates in the current route decision.",
+        "description": "Optional asynchronous post-turn Review. It evaluates turns and reviews skill relations but never participates in the current route decision.",
         "additionalProperties": false,
         "properties": {
           "enabled": {
@@ -560,7 +517,7 @@
           },
           "modelFallback": {
             "type": "string",
-            "description": "Last-resort Intent Review model after explicit, current-session, and agent-primary resolution. It is not a runtime retry model."
+            "description": "Last-resort Review model after explicit, current-session, and agent-primary resolution. It is not a runtime retry model."
           },
           "thinking": {
             "type": "string",
@@ -588,26 +545,9 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "experienceHealthCheck": {
+              "relationHealthCheck": {
                 "type": "object",
                 "additionalProperties": false,
-                "properties": {
-                  "enabled": {
-                    "type": "boolean",
-                    "default": true
-                  },
-                  "everyTurns": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 1000,
-                    "default": 10
-                  }
-                }
-              },
-              "intentHealthCheck": {
-                "type": "object",
-                "additionalProperties": false,
-                "description": "Deprecated alias for experienceHealthCheck.",
                 "properties": {
                   "enabled": {
                     "type": "boolean",

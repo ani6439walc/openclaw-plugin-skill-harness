@@ -115,7 +115,7 @@ export async function evaluateSelection(params: {
     const outcome = await params.api.runtime.decisions.evaluate(params.batch, {
       agentId: params.agentId,
       purpose: "skill-harness.unified-selection",
-      rubricVersion: "1",
+      rubricVersion: "2",
       timeoutMs: Math.min(params.timeoutMs, 30_000),
       signal: params.signal,
     });

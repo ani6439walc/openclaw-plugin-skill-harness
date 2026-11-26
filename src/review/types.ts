@@ -1,6 +1,4 @@
-import type { ReviewOperation } from "./log.js";
 import type { ReviewTrigger } from "./triggers.js";
-import type { AvailableSkill } from "../types.js";
 import type { RelationType } from "../skills/relation-graph.js";
 
 export interface ReviewRecommendationCandidate {
@@ -19,7 +17,6 @@ export type ReviewState = {
   input?: string;
   confidence?: number;
   matchedSkills?: string[];
-  matchedExperiences?: string[];
   capabilityFit?: CapabilityFitEvidence;
   recommendationCandidates?: ReviewRecommendationCandidate[];
   skillsUsed?: Array<{
@@ -58,18 +55,6 @@ type BaseReviewFinding = {
   suggestedChange: string;
 };
 
-export type SkillExperienceReviewFinding = BaseReviewFinding & {
-  targetKind: "skill-experience";
-  targetExperienceIds: string[];
-} & (
-    | { operation: Exclude<ReviewOperation, "merge"> }
-    | {
-        operation: "merge";
-        sourceExperienceIds: string[];
-        retainedExperienceId: string;
-      }
-  );
-
 export interface RelationEvidenceReference {
   skillId: string;
   filePath: "SKILL.md";
@@ -86,16 +71,11 @@ export type SkillRelationReviewFinding = BaseReviewFinding & {
   relationType?: RelationType;
   reason?: string;
   relationEvidence: RelationEvidenceReference[];
-  targetExperienceIds?: never;
-  sourceExperienceIds?: never;
-  retainedExperienceId?: never;
 };
 
-export type ReviewFinding =
-  SkillExperienceReviewFinding | SkillRelationReviewFinding;
+export type ReviewFinding = SkillRelationReviewFinding;
 
-export type ReviewDomainOutcome =
-  "applied" | "partial" | "validation-failed" | "aborted";
+export type ReviewDomainOutcome = "applied" | "validation-failed" | "aborted";
 
 export interface RelationReviewAssessment {
   existing: "changes-proposed" | "no-change" | "not-applicable";

@@ -154,14 +154,7 @@ describe("resolveConfig", () => {
       expect(result.routing.scope.allowedChatIds).toEqual([]);
       expect(result.routing.scope.deniedChatIds).toEqual([]);
 
-      expect(result.routing.experiences).toEqual({
-        search: {
-          minCandidateScore: 0.4,
-          timeoutMs: 15000,
-        },
-        relevanceThreshold: 0.6,
-        maxInjectedExperiences: 4,
-      });
+      expect(result.routing).not.toHaveProperty("experiences");
 
       expect(result.routing.queryMode).toBe(DEFAULT_QUERY_MODE);
       expect(result.routing.timeoutMs).toBe(DEFAULT_TIMEOUT_MS);
@@ -206,7 +199,7 @@ describe("resolveConfig", () => {
         thinking: "medium",
         timeoutSeconds: 300,
         triggers: {
-          intentHealthCheck: { enabled: true, everyTurns: 10 },
+          relationHealthCheck: { enabled: true, everyTurns: 10 },
           routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
           capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
         },
@@ -348,34 +341,9 @@ describe("resolveConfig", () => {
     });
   });
 
-  describe("routing & experiences", () => {
-    it("resolves default routing experiences when routing is omitted", () => {
-      expect(resolveConfig({}).routing.experiences).toEqual({
-        search: {
-          minCandidateScore: 0.4,
-          timeoutMs: 15000,
-        },
-        relevanceThreshold: 0.6,
-        maxInjectedExperiences: 4,
-      });
-    });
-
-    it("accepts custom routing experiences configuration", () => {
-      expect(
-        resolveConfig({
-          routing: {
-            experiences: {
-              search: { minCandidateScore: 0.5 },
-              relevanceThreshold: 0.7,
-              maxInjectedExperiences: 6,
-            },
-          },
-        }).routing.experiences,
-      ).toEqual({
-        search: { minCandidateScore: 0.5, timeoutMs: 15000 },
-        relevanceThreshold: 0.7,
-        maxInjectedExperiences: 6,
-      });
+  describe("routing", () => {
+    it("rejects retired experience routing even with default values", () => {
+      expect(() => resolveConfig({ routing: { experiences: {} } })).toThrow();
     });
 
     it("ignores legacy intents and thresholds gracefully", () => {
@@ -397,17 +365,8 @@ describe("resolveConfig", () => {
       ).toBeUndefined();
     });
 
-    it("rejects out-of-range routing experiences configuration", () => {
+    it("rejects null routing settings", () => {
       expect(() => resolveConfig({ routing: null })).toThrow();
-      expect(() =>
-        resolveConfig({
-          routing: {
-            experiences: {
-              relevanceThreshold: 2.5,
-            },
-          },
-        }),
-      ).toThrow();
     });
 
     it("documents mandatory QMD configuration before Quick Start enables the plugin", () => {
@@ -423,17 +382,6 @@ describe("resolveConfig", () => {
             qmd: {
               required?: string[];
               properties: Record<string, { required?: string[] }>;
-            };
-            routing?: {
-              properties: {
-                experiences?: {
-                  properties: {
-                    search: {
-                      properties: { minCandidateScore: { default?: number } };
-                    };
-                  };
-                };
-              };
             };
           };
         };
@@ -453,10 +401,6 @@ describe("resolveConfig", () => {
       expect(
         manifest.configSchema.properties.qmd.properties,
       ).not.toHaveProperty("rerank");
-      expect(
-        manifest.configSchema.properties.routing?.properties.experiences
-          ?.properties.search.properties.minCandidateScore.default,
-      ).toBe(0.4);
       for (const endpoint of ["embedding", "expansion"]) {
         expect(
           manifest.configSchema.properties.qmd.properties[endpoint]?.required,
@@ -864,7 +808,7 @@ describe("resolveConfig", () => {
           thinking: "high",
           timeoutSeconds: 600,
           triggers: {
-            intentHealthCheck: { everyTurns: 0 },
+            relationHealthCheck: { everyTurns: 0 },
             routingUncertainty: { enabled: false, confidenceBelow: 2 },
             capabilityFit: { enabled: false, toolCalls: 0, toolFailures: 500 },
           },
@@ -878,31 +822,38 @@ describe("resolveConfig", () => {
         thinking: "high",
         timeoutSeconds: 600,
         triggers: {
-          intentHealthCheck: { enabled: true, everyTurns: 1 },
+          relationHealthCheck: { enabled: true, everyTurns: 1 },
           routingUncertainty: { enabled: false, confidenceBelow: 1 },
           capabilityFit: { enabled: false, toolCalls: 1, toolFailures: 100 },
         },
       });
     });
 
-    it("drops retired review configuration keys", () => {
-      const result = resolveConfig({
-        review: {
-          keywordCoverage: { everyAcceptedTurns: 50 },
-          triggers: {
-            successfulPattern: { keywords: ["ship it"] },
-            skillPlacement: { enabled: false },
+    it.each([
+      "experienceHealthCheck",
+      "intentHealthCheck",
+      "successfulPattern",
+      "skillPlacement",
+    ])("rejects unsupported Review trigger %s", (key) => {
+      expect(() =>
+        resolveConfig({
+          review: {
+            enabled: true,
+            triggers: {
+              relationHealthCheck: { enabled: true, everyTurns: 3 },
+              [key]: {},
+            },
           },
-        },
-      });
+        }),
+      ).toThrow();
+    });
 
-      expect(result.review).not.toHaveProperty("keywordCoverage");
-      expect(result.review.triggers).toEqual({
-        intentHealthCheck: { enabled: true, everyTurns: 10 },
-        experienceHealthCheck: { enabled: true, everyTurns: 10 },
-        routingUncertainty: { enabled: true, confidenceBelow: 0.5 },
-        capabilityFit: { enabled: true, toolCalls: 5, toolFailures: 2 },
-      });
+    it("omits retired keyword coverage settings", () => {
+      expect(
+        resolveConfig({
+          review: { keywordCoverage: { everyAcceptedTurns: 50 } },
+        }).review,
+      ).not.toHaveProperty("keywordCoverage");
     });
 
     it("falls back for invalid review thinking levels", () => {

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   ROUTING_ADVISORY_HEADER,
   ROUTING_ADVISORY_INTENT_ONLY_HEADER,
-  ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER,
 } from "../constants.js";
 import {
   sanitizeConversationText,
@@ -81,9 +80,21 @@ PATH: darling/projects/personal/減肥.md (detailed weight loss journey & diet r
     expect(sanitizeConversationText(raw)).toBe("我之前都吃甚麼");
   });
 
+  it.each([
+    "Inferred relevant skills and experiences from conversation (advisory, non-user input; load with `skill_view` or `skill_experience` if relevant):",
+    "Inferred relevant experiences from conversation (advisory, non-user input; load with `skill_experience` if relevant):",
+  ])(
+    "strips a retired standalone advisory header from historical input",
+    (header) => {
+      expect(sanitizeConversationText(`${header}\nRead this file`)).toBe(
+        "Read this file",
+      );
+    },
+  );
+
   it("strips routing block when advisory header is inside skill_harness_plugin", () => {
     const raw = `<skill_harness_plugin>
-  ${ROUTING_ADVISORY_SKILLS_AND_EXPERIENCES_HEADER}
+  Inferred relevant skills and experiences from conversation (advisory, non-user input; load with \`skill_view\` or \`skill_experience\` if relevant):
   <matched_experiences>
     <experience id="exp-1">desc</experience>
   </matched_experiences>

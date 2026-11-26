@@ -54,15 +54,12 @@ import {
   resolveAvailableSkills,
   resolveSkillInventory,
 } from "../skills/index.js";
-import { experiencesPath, packageRoot } from "../file-utils.js";
+import { packageRoot } from "../file-utils.js";
 import { prepareRelationReviewContext } from "../review/relations.js";
 import type {
   RelationReviewContext,
   RelationPreparationSummary,
 } from "../review/relations.js";
-import { SkillExperienceCatalog } from "../experiences/index.js";
-import type { SkillExperienceEntry } from "../experiences/index.js";
-import type { SkillExperienceHit } from "../qmd/experience-index.js";
 import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
 import { matchAvailableSkillNamesWithTokens } from "../skills/name-index.js";
 import {
@@ -222,10 +219,8 @@ export function createHookHandlers(deps: HookDeps) {
             modelRef: callParams.modelRef,
             candidateSkills: callParams.candidateSkills,
             candidateSources: callParams.candidateSources,
-            visibleSkillNames: callParams.visibleSkillNames,
             relatedEvidence: callParams.relatedEvidence,
             relationEvidence: callParams.relationEvidence,
-            candidateExperiences: callParams.candidateExperiences,
             dataRoot: callParams.dataRoot,
             signal: callParams.signal,
             assertActive: callParams.assertActive,
@@ -236,18 +231,13 @@ export function createHookHandlers(deps: HookDeps) {
               ? { relationDecisions: classified.relationDecisions }
               : {}),
             skills: classified.skills ?? [],
-            experiences: classified.experiences ?? [],
             confidence: classified.confidence ?? 1.0,
             reason: classified.reason ?? "Selected relevant candidate skills",
           };
         }
       : runJevUnifiedRouting);
   const clock = deps.clock ?? (() => new Date());
-  const experienceCatalog =
-    deps.experienceCatalog ??
-    (deps.dataRoot ? new SkillExperienceCatalog(deps.dataRoot) : undefined);
   const qmdSkillIndex = deps.qmdSkillIndex;
-  const qmdExperienceIndex = deps.qmdExperienceIndex;
 
   const reviewLogWriter: NonNullable<HookDeps["reviewLogWriter"]> =
     deps.reviewLogWriter ??
@@ -277,160 +267,125 @@ export function createHookHandlers(deps: HookDeps) {
     });
 
   reviewScheduler.setRunner(async (candidate, abortSignal) => {
-    try {
-      const observedSkillNames = new Set(
-        (candidate.snapshot.current.skillsUsed ?? []).map((skill) =>
-          skill.name.trim().toLowerCase(),
-        ),
-      );
-      let allowedExperienceSkills: string[] = [];
-      try {
-        const inventory = await skillInventoryResolver({
-          api,
-          agentId: candidate.agentId,
-          bundledSkillsDir,
-          nativeBundledSkillsDir: await nativeBundledSkillsDir,
-          sharedRoots: sharedRoots(),
-        });
-        allowedExperienceSkills = (inventory ?? [])
-          .map((skill) => skill.name.trim().toLowerCase())
-          .filter((skill) => observedSkillNames.has(skill));
-      } catch (error) {
-        logger.warn(
-          formatErrorDiagnostic(
-            "failed to resolve review experience skill inventory",
-            error,
+    const getNeighborOffset = reviewLogWriter.inspectionOffsetsForEvent(
+      candidate.snapshot.eventId,
+    );
+    if (!getNeighborOffset) return;
+    let relationContext: RelationReviewContext | undefined;
+    let relationPreparation: RelationPreparationSummary = {
+      status: "skipped",
+      reason: "no-data-root",
+      requestedSeeds: 0,
+      capturedSeeds: 0,
+      capturedExtras: 0,
+      existingNeighborAttempts: 0,
+      discoveryAttempts: 0,
+      skippedCaptureCount: 0,
+    };
+    if (deps.dataRoot) {
+      const seedNames = [
+        ...new Set([
+          ...(candidate.snapshot.current.matchedSkills ?? []),
+          ...(candidate.snapshot.current.skillsUsed ?? []).map(
+            (skill) => skill.name,
           ),
+        ]),
+      ];
+      try {
+        relationContext = await prepareRelationReviewContext({
+          dataRoot: deps.dataRoot,
+          seedNames,
+          getVisibleSkills: async () =>
+            (deps.reviewSkillResolver ?? listAvailableSkills)({
+              api,
+              agentId: candidate.agentId,
+              bundledSkillsDir,
+              nativeBundledSkillsDir: await nativeBundledSkillsDir,
+              sharedRoots: sharedRoots(),
+              usageStats: {},
+              cacheTtlMs: 0,
+            }),
+          getNeighborOffset,
+          onPreparation: (summary) => {
+            relationPreparation = summary;
+          },
+          signal: abortSignal,
+        });
+      } catch {
+        if (abortSignal.aborted) return;
+        relationPreparation = {
+          ...relationPreparation,
+          status: "skipped",
+          reason: "preparation-failed",
+          requestedSeeds: seedNames.length,
+        };
+        logger.warn(
+          `review relation evidence unavailable ${JSON.stringify({
+            reason: "preparation-failed",
+          })}`,
         );
       }
-      let relationContext: RelationReviewContext | undefined;
-      let relationPreparation: RelationPreparationSummary = {
-        status: "skipped",
-        reason: "no-data-root",
-        requestedSeeds: 0,
-        capturedSeeds: 0,
-        capturedExtras: 0,
-        existingNeighborAttempts: 0,
-        discoveryAttempts: 0,
-        skippedCaptureCount: 0,
-      };
-      if (deps.dataRoot) {
-        const seedNames = [
-          ...new Set([
-            ...(candidate.snapshot.current.matchedSkills ?? []),
-            ...(candidate.snapshot.current.skillsUsed ?? []).map(
-              (skill) => skill.name,
-            ),
-          ]),
-        ];
-        try {
-          relationContext = await prepareRelationReviewContext({
-            dataRoot: deps.dataRoot,
-            seedNames,
-            getVisibleSkills: async () =>
-              (deps.reviewSkillResolver ?? listAvailableSkills)({
-                api,
-                agentId: candidate.agentId,
-                bundledSkillsDir,
-                nativeBundledSkillsDir: await nativeBundledSkillsDir,
-                sharedRoots: sharedRoots(),
-                usageStats: {},
-                cacheTtlMs: 0,
-              }),
-            getNeighborOffset: (key) =>
-              reviewLogWriter.relationInspectionOffset?.(key) ?? 0,
-            onPreparation: (summary) => {
-              relationPreparation = summary;
-            },
-            signal: abortSignal,
-          });
-        } catch {
-          if (abortSignal.aborted) return;
-          relationPreparation = {
-            ...relationPreparation,
-            status: "skipped",
-            reason: "preparation-failed",
-            requestedSeeds: seedNames.length,
-          };
-          logger.warn(
-            `review relation evidence unavailable ${JSON.stringify({
-              reason: "preparation-failed",
-            })}`,
-          );
-        }
-      }
-      abortSignal.throwIfAborted();
-      const reviewResult = await reviewer({
-        reviewToolRegistry: deps.reviewToolRegistry,
-        api,
-        config: candidate.resolvedConfig,
-        agentId: candidate.agentId,
-        experienceDirectory: experiencesPath(deps.dataRoot ?? "."),
-        allowedExperienceSkills,
-        ...(relationContext ? { relationContext } : {}),
-        sessionKey: candidate.ctx.sessionKey ?? candidate.snapshot.sessionKey,
-        messageProvider: candidate.ctx.messageProvider,
-        modelRef: candidate.modelRef,
-        snapshot: candidate.snapshot,
-        triggers: candidate.triggers,
-        dataRoot: deps.dataRoot,
-        abortSignal,
-      });
-      if (
-        !reviewResult ||
-        (abortSignal.aborted &&
-          !reviewResult.changedRelationCount &&
-          !reviewResult.changedExperienceIds?.length)
-      )
-        return;
-      await reviewLogWriter.record(
-        candidate.snapshot.eventId,
-        {
-          sessionId: candidate.snapshot.sessionId,
-          sessionKey: candidate.snapshot.sessionKey,
-          agentId: candidate.snapshot.agentId,
-          turnStart: candidate.snapshot.current.timestamps!.start!,
-        },
-        reviewResult.findings,
-        {
-          triggers: candidate.triggers,
-          outcome: reviewResult.outcome,
-          changedExperienceIds: reviewResult.changedExperienceIds,
-          ...(reviewResult.changedRelationCount !== undefined
-            ? { changedRelationCount: reviewResult.changedRelationCount }
-            : {}),
-          ...(reviewResult.relationBatchId
-            ? { relationBatchId: reviewResult.relationBatchId }
-            : {}),
-          ...(reviewResult.relationOutcome
-            ? { relationOutcome: reviewResult.relationOutcome }
-            : {}),
-          ...(reviewResult.experienceOutcome
-            ? { experienceOutcome: reviewResult.experienceOutcome }
-            : {}),
-          ...(reviewResult.partialExperienceIds
-            ? { partialExperienceIds: reviewResult.partialExperienceIds }
-            : {}),
-          validationErrors: reviewResult.validationErrors,
-          noFindingReasonCounts: reviewResult.noFindingReasonCounts,
-          schemaRejectionReasonCounts: reviewResult.schemaRejectionReasonCounts,
-          relationPreparation:
-            relationContext?.preparation ?? relationPreparation,
-          relationReview: reviewResult.relationReview,
-          relationSearchCount: reviewResult.relationSearchCount,
-          relationInspectionCursor: relationContext?.inspectionCursor,
-        },
-      );
-      if (
-        reviewResult.changedExperienceIds?.length &&
-        experienceCatalog &&
-        qmdExperienceIndex
-      ) {
-        qmdExperienceIndex.schedule(experienceCatalog.listAll());
-      }
-    } finally {
-      // Intent review run complete
     }
+    abortSignal.throwIfAborted();
+    const source = {
+      sessionId: candidate.snapshot.sessionId,
+      sessionKey: candidate.snapshot.sessionKey,
+      agentId: candidate.snapshot.agentId,
+      turnStart: candidate.snapshot.current.timestamps!.start!,
+    };
+    if (!relationContext) {
+      await reviewLogWriter.record(candidate.snapshot.eventId, source, [], {
+        triggers: candidate.triggers,
+        outcome: "skipped",
+        relationPreparation,
+        relationSearchCount: 0,
+      });
+      return;
+    }
+    const reviewResult = await reviewer({
+      reviewToolRegistry: deps.reviewToolRegistry,
+      api,
+      config: candidate.resolvedConfig,
+      agentId: candidate.agentId,
+      relationContext,
+      sessionKey: candidate.ctx.sessionKey ?? candidate.snapshot.sessionKey,
+      messageProvider: candidate.ctx.messageProvider,
+      modelRef: candidate.modelRef,
+      snapshot: candidate.snapshot,
+      triggers: candidate.triggers,
+      abortSignal,
+    });
+    if (
+      !reviewResult ||
+      (abortSignal.aborted && !reviewResult.changedRelationCount)
+    )
+      return;
+    await reviewLogWriter.record(
+      candidate.snapshot.eventId,
+      source,
+      reviewResult.findings,
+      {
+        triggers: candidate.triggers,
+        outcome: reviewResult.outcome,
+        ...(reviewResult.changedRelationCount !== undefined
+          ? { changedRelationCount: reviewResult.changedRelationCount }
+          : {}),
+        ...(reviewResult.relationBatchId
+          ? { relationBatchId: reviewResult.relationBatchId }
+          : {}),
+        ...(reviewResult.relationOutcome
+          ? { relationOutcome: reviewResult.relationOutcome }
+          : {}),
+        validationErrors: reviewResult.validationErrors,
+        noFindingReasonCounts: reviewResult.noFindingReasonCounts,
+        schemaRejectionReasonCounts: reviewResult.schemaRejectionReasonCounts,
+        relationPreparation:
+          relationContext?.preparation ?? relationPreparation,
+        relationReview: reviewResult.relationReview,
+        relationSearchCount: reviewResult.relationSearchCount,
+        relationInspectionCursor: relationContext?.inspectionCursor,
+      },
+    );
   });
 
   interface PromptBuildIdentity {
@@ -705,7 +660,6 @@ export function createHookHandlers(deps: HookDeps) {
     association?: TurnAssociation;
     latestUserMessage: string;
     matchedSkills?: readonly AvailableSkill[];
-    matchedExperiences?: readonly SkillExperienceEntry[];
     inputSkillDiscovery?: InputSkillDiscovery;
     confidence: number;
     assertActive: () => void;
@@ -721,8 +675,6 @@ export function createHookHandlers(deps: HookDeps) {
       data: {
         input: params.latestUserMessage,
         matchedSkills: params.matchedSkills?.map((skill) => skill.name) ?? [],
-        matchedExperiences:
-          params.matchedExperiences?.map((entry) => entry.id) ?? [],
         inputSkillDiscovery: params.inputSkillDiscovery,
         confidence: params.confidence,
       },
@@ -746,10 +698,6 @@ export function createHookHandlers(deps: HookDeps) {
     visibleSkills: AvailableSkill[];
     nameCandidates: SkillDiscoveryCandidate[];
     retrievalCandidates: SkillDiscoveryCandidate[];
-    candidateExperiences: SkillExperienceEntry[];
-    experienceRetrieval: NonNullable<
-      InputSkillDiscovery["experienceRetrieval"]
-    >;
     retrievalSemanticScores: number[];
     retrievalCollections: Record<SkillCollectionKind, number>;
     fallbackReason?: SkillCandidatePoolFallbackReason;
@@ -765,33 +713,11 @@ export function createHookHandlers(deps: HookDeps) {
   }): Promise<SkillCandidateDiscoveryResult> {
     const startedAtMs = Date.now();
     const policy = params.refreshedConfig.routing.skills;
-    const expPolicy = params.refreshedConfig.routing.experiences;
     const retrievalCollections: Record<SkillCollectionKind, number> = {
       meta: 0,
       body: 0,
       references: 0,
     };
-
-    if (
-      policy.maxInjectedSkills === 0 &&
-      expPolicy.maxInjectedExperiences === 0
-    ) {
-      return {
-        visibleSkills: [],
-        nameCandidates: [],
-        retrievalCandidates: [],
-        candidateExperiences: [],
-        experienceRetrieval: {
-          status: "disabled",
-          minCandidateScore: expPolicy.search.minCandidateScore,
-          hits: [],
-          candidateCount: 0,
-        },
-        retrievalSemanticScores: [],
-        retrievalCollections,
-        startedAtMs,
-      };
-    }
 
     let visibleSkills: AvailableSkill[] = [];
     try {
@@ -864,7 +790,6 @@ export function createHookHandlers(deps: HookDeps) {
 
     let retrievalCandidates: SkillDiscoveryCandidate[] = [];
     let retrievalSemanticScores: number[] = [];
-    let experienceCandidates: SkillDiscoveryCandidate[] = [];
 
     const expansionContext = formatConversationExpansionContext({
       conversation: params.conversation,
@@ -999,132 +924,12 @@ export function createHookHandlers(deps: HookDeps) {
       }
     };
 
-    const candidateExperiences: SkillExperienceEntry[] = [];
-    const experienceRetrieval: NonNullable<
-      InputSkillDiscovery["experienceRetrieval"]
-    > = {
-      status:
-        expPolicy.maxInjectedExperiences === 0 ? "disabled" : "unavailable",
-      minCandidateScore: expPolicy.search.minCandidateScore,
-      hits: [],
-      candidateCount: 0,
-    };
-    const searchExperiences = async () => {
-      const searchStartedAtMs = Date.now();
-      let searchError: string | undefined;
-      let searchReason: string | undefined;
-      let searchConfidence: number | undefined;
-      let expTimer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        if (expPolicy.maxInjectedExperiences === 0) return;
-        if (!qmdExperienceIndex) {
-          searchError = "qmd experience index unavailable";
-          return;
-        }
-        const timeout = new Promise<"timeout">((resolve) => {
-          expTimer = setTimeout(
-            () => resolve("timeout"),
-            expPolicy.search.timeoutMs,
-          );
-        });
-        const expOutcome = await Promise.race([
-          qmdExperienceIndex
-            .search({
-              query: params.latestUserMessage,
-              limit: expPolicy.maxInjectedExperiences * 3,
-              ...(expansionContext ? { expansionContext } : {}),
-            })
-            .then((hits) => ({ hits }))
-            .catch((error) => ({ error })),
-          timeout,
-        ]);
-        if (expOutcome === "timeout") {
-          experienceRetrieval.status = "timeout";
-          searchError = "qmd experience search timed out";
-        } else if ("error" in expOutcome) {
-          experienceRetrieval.status = "error";
-          throw expOutcome.error;
-        } else if (expOutcome.hits) {
-          experienceRetrieval.status = "completed";
-          experienceRetrieval.hits = expOutcome.hits.map((hit) => ({
-            id: hit.id,
-            semanticScore: hit.semanticScore,
-          }));
-        }
-        if (
-          expOutcome !== "timeout" &&
-          !("error" in expOutcome) &&
-          expOutcome.hits
-        ) {
-          const qualifiedHits = expOutcome.hits.filter(
-            (hit) =>
-              roundToDecimals(hit.semanticScore, 2) >=
-              roundToDecimals(expPolicy.search.minCandidateScore, 2),
-          );
-          const topHit = qualifiedHits[0];
-          if (topHit) {
-            searchReason = `#1 ${topHit.id} · RRF ${topHit.score.toFixed(4)}`;
-            searchConfidence = topHit.semanticScore;
-          }
-          for (const hit of qualifiedHits) {
-            const resolved = experienceCatalog?.resolve(hit.id);
-            if (resolved) {
-              candidateExperiences.push(resolved);
-            } else {
-              candidateExperiences.push({
-                id: hit.id,
-                skills: [...hit.skills],
-                summary: "",
-                keywords: [],
-                body: "",
-                path: "",
-              });
-            }
-          }
-          experienceRetrieval.candidateCount = candidateExperiences.length;
-        } else if (expOutcome !== "timeout" && !("error" in expOutcome)) {
-          searchError = "qmd experience index unavailable";
-        }
-      } catch (error) {
-        experienceRetrieval.status = "error";
-        searchError = eventError(error);
-        logger.warn(
-          formatErrorDiagnostic("experience candidate retrieval failed", error),
-        );
-      } finally {
-        if (expTimer !== undefined) clearTimeout(expTimer);
-        emitPipelineEvent(
-          params.ctx,
-          params.routing.resolvedSessionKey,
-          "experience-search",
-          "completed",
-          {
-            status: experienceRetrieval.status,
-            result: [
-              ...new Set(candidateExperiences.flatMap((entry) => entry.skills)),
-            ],
-            ...(searchReason ? { reason: searchReason } : {}),
-            ...(searchConfidence === undefined
-              ? {}
-              : { confidence: searchConfidence }),
-            ...(searchError ? { error: searchError } : {}),
-            minCandidateScore: experienceRetrieval.minCandidateScore,
-            hits: experienceRetrieval.hits,
-            candidateCount: experienceRetrieval.candidateCount,
-            durationMs: Math.max(0, Date.now() - searchStartedAtMs),
-          },
-        );
-      }
-    };
-
-    await Promise.all([searchSkills(), searchExperiences()]);
+    await searchSkills();
 
     return {
       visibleSkills,
       nameCandidates,
       retrievalCandidates,
-      candidateExperiences,
-      experienceRetrieval,
       retrievalSemanticScores,
       retrievalCollections,
       fallbackReason,
@@ -1450,10 +1255,7 @@ export function createHookHandlers(deps: HookDeps) {
       if (request) request.association = routing.association;
       promptExecutions.observe(routing.association);
 
-      if (
-        refreshedConfig.routing.skills.maxInjectedSkills === 0 &&
-        refreshedConfig.routing.experiences.maxInjectedExperiences === 0
-      ) {
+      if (refreshedConfig.routing.skills.maxInjectedSkills === 0) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
       }
 
@@ -1511,10 +1313,7 @@ export function createHookHandlers(deps: HookDeps) {
 
               const relationGraph =
                 refreshedConfig.routing.skills.maxInjectedSkills > 0 &&
-                (unionPool.candidateSkills.length > 0 ||
-                  skillDiscoveryResult.candidateExperiences.some(
-                    (experience) => experience.skills.length > 0,
-                  )) &&
+                unionPool.candidateSkills.length > 0 &&
                 deps.dataRoot
                   ? await resolveRelationGraph(
                       deps.dataRoot,
@@ -1530,7 +1329,6 @@ export function createHookHandlers(deps: HookDeps) {
                 originals: unionPool.candidateSkills,
                 nameCandidates: skillDiscoveryResult.nameCandidates,
                 retrievalCandidates: skillDiscoveryResult.retrievalCandidates,
-                experiences: skillDiscoveryResult.candidateExperiences,
                 expanded: related.candidateSkills,
                 expandedNames: related.added,
                 visibleSkills: skillDiscoveryResult.visibleSkills,
@@ -1546,9 +1344,7 @@ export function createHookHandlers(deps: HookDeps) {
               let relationDecisions: RelationDecision[] = [];
               let confidence = 0;
               let matchedSkills: readonly AvailableSkill[] = [];
-              let matchedExperiences: SkillExperienceEntry[] = [];
               let selectedSkills: string[] = [];
-              let selectedExperiences: string[] = [];
               let rerankStatus:
                 "completed" | "skipped" | "unavailable" | "error" = "skipped";
               let rerankError: string | undefined;
@@ -1560,12 +1356,8 @@ export function createHookHandlers(deps: HookDeps) {
                 ]),
               );
 
-              if (
-                superset.candidateSkills.length === 0 &&
-                skillDiscoveryResult.candidateExperiences.length === 0
-              ) {
+              if (superset.candidateSkills.length === 0) {
                 matchedSkills = [];
-                matchedExperiences = [];
               } else {
                 try {
                   const llmResult = await withPromptDeadline(
@@ -1585,14 +1377,8 @@ export function createHookHandlers(deps: HookDeps) {
                           channelId: ctx.channelId,
                           candidateSkills: superset.candidateSkills,
                           candidateSources: superset.candidateSources,
-                          visibleSkillNames:
-                            skillDiscoveryResult.visibleSkills.map(
-                              (skill) => skill.name,
-                            ),
                           relatedEvidence: related.evidence,
                           relationEvidence,
-                          candidateExperiences:
-                            skillDiscoveryResult.candidateExperiences,
                           dataRoot: deps.dataRoot,
                           signal,
                           assertActive: assertSelectorActive,
@@ -1607,25 +1393,6 @@ export function createHookHandlers(deps: HookDeps) {
                     relationDecisions = llmResult.relationDecisions ?? [];
                     confidence = llmResult.confidence;
                     selectedSkills = [...llmResult.skills];
-                    selectedExperiences = [...(llmResult.experiences ?? [])];
-                    const candidateExpMap = new Map(
-                      skillDiscoveryResult.candidateExperiences.map((e) => [
-                        e.id,
-                        e,
-                      ]),
-                    );
-                    matchedExperiences = (llmResult.experiences ?? [])
-                      .flatMap((id: string) => {
-                        const e =
-                          candidateExpMap.get(id) ??
-                          experienceCatalog?.resolve(id);
-                        return e ? [e] : [];
-                      })
-                      .slice(
-                        0,
-                        refreshedConfig.routing.experiences
-                          .maxInjectedExperiences,
-                      );
 
                     const candidates = new Set(
                       superset.candidateSkills.map((skill) =>
@@ -1648,7 +1415,6 @@ export function createHookHandlers(deps: HookDeps) {
                     rerankStatus = "unavailable";
                     rerankError = "Routing selection unavailable";
                     matchedSkills = [];
-                    matchedExperiences = [];
                   }
                 } catch (error) {
                   rerankStatus = "error";
@@ -1659,7 +1425,6 @@ export function createHookHandlers(deps: HookDeps) {
                     })}`,
                   );
                   matchedSkills = [];
-                  matchedExperiences = [];
                 }
               }
 
@@ -1708,9 +1473,7 @@ export function createHookHandlers(deps: HookDeps) {
                 } else {
                   injectedCandidates.push({
                     name: skill.name,
-                    source: sources.includes("experience-associated")
-                      ? "experience-associated"
-                      : "related-declared",
+                    source: "related-declared",
                     sources,
                   });
                 }
@@ -1738,13 +1501,6 @@ export function createHookHandlers(deps: HookDeps) {
               ) {
                 contributedBy.push("search");
               }
-              if (
-                injectedCandidates.some((candidate) =>
-                  candidate.sources?.includes("experience-associated"),
-                )
-              ) {
-                contributedBy.push("experience-associated");
-              }
 
               const inputSkillDiscovery: InputSkillDiscovery = {
                 nameCandidates: skillDiscoveryResult.nameCandidates.length,
@@ -1755,7 +1511,6 @@ export function createHookHandlers(deps: HookDeps) {
                   skillDiscoveryResult.retrievalCandidates.length,
                 retrievalSemanticScores:
                   skillDiscoveryResult.retrievalSemanticScores,
-                experienceRetrieval: skillDiscoveryResult.experienceRetrieval,
                 candidateCount: superset.candidateSkills.length,
                 ...(related.added.length
                   ? { relatedCandidates: related.added }
@@ -1778,7 +1533,6 @@ export function createHookHandlers(deps: HookDeps) {
                 association: routing.association,
                 latestUserMessage,
                 matchedSkills,
-                matchedExperiences,
                 inputSkillDiscovery,
                 confidence,
               });
@@ -1796,28 +1550,20 @@ export function createHookHandlers(deps: HookDeps) {
                   ...(rerankStatus === "completed" ? { confidence } : {}),
                   ...(rerankError ? { error: rerankError } : {}),
                   selectedSkills,
-                  selectedExperiences,
-                  experienceCandidates:
-                    skillDiscoveryResult.candidateExperiences.length,
                   candidateCount: superset.candidateSkills.length,
                   relatedCandidates: related.added,
                   ...(relationDecisions.length ? { relationDecisions } : {}),
                   injectedCount: matchedSkills.length,
                   injectedSkills: matchedSkills.map((s) => s.name),
-                  injectedExperiences: matchedExperiences.map((e) => e.id),
                   durationMs: Math.max(0, Date.now() - rerankStartedAtMs),
                 },
               );
 
-              if (
-                matchedSkills.length === 0 &&
-                matchedExperiences.length === 0
-              ) {
+              if (matchedSkills.length === 0) {
                 return undefined;
               }
               return buildRoutingContext({
                 matchedSkills,
-                experiences: matchedExperiences,
                 relationDecisions,
                 relationRelevanceThreshold:
                   refreshedConfig.routing.skills.related.relevanceThreshold,
@@ -2055,16 +1801,11 @@ export function createHookHandlers(deps: HookDeps) {
       }
     }
     observePhase?.("stats");
-    const recorded = skillInventory
-      ? statsAggregator.record(sessionId, state, undefined, {
-          skillInventory,
-        })
-      : statsAggregator.record(sessionId, state);
-    if (!recorded) return;
-    return {
-      agentId,
-      skillInventoryObserved: skillInventory !== undefined,
-    };
+    if (skillInventory) {
+      statsAggregator.record(sessionId, state, undefined, { skillInventory });
+    } else {
+      statsAggregator.record(sessionId, state);
+    }
   }
 
   async function buildReviewSnapshot(
@@ -2152,8 +1893,7 @@ export function createHookHandlers(deps: HookDeps) {
     observePhase?: AgentEndPhaseObserver,
   ): Promise<void> {
     if (!association) return;
-    const agentEndStats = await recordAgentEndStats(association, observePhase);
-    if (!agentEndStats) return;
+    await recordAgentEndStats(association, observePhase);
 
     observePhase?.("review-preparation");
     const resolvedConfig = config();
@@ -2406,7 +2146,11 @@ export function createHookHandlers(deps: HookDeps) {
         pendingToolCalls.delete(toolCallId);
         recordedToolCalls.add(toolCallId);
       }
-      await finalizeTrackedTurn(association, ctx);
+      if (finalized === "applied") {
+        await finalizeTrackedTurn(association, ctx);
+      } else {
+        await recordAgentEndStats(association);
+      }
     }
   }
 

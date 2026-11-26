@@ -37,7 +37,7 @@ function relationLog(
   receipt: Record<string, unknown> = {},
 ) {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     createdAt: "2026-06-11",
     updatedAt: "2026-06-11",
     processedEvents: {
@@ -47,6 +47,9 @@ function relationLog(
         changeCount: 1,
         outcome: "applied",
         changes: [change],
+        changedRelationCount: 1,
+        relationOutcome: "applied",
+        relationBatchId: "batch-1",
         ...receipt,
       },
     },
@@ -94,7 +97,7 @@ describe("relation review audit", () => {
     ).toEqual(change);
   });
   it.each(["create", "update", "delete"])(
-    "roundtrips relation %s without experience targets",
+    "roundtrips a committed relation %s",
     (operation) => {
       const raw = relationLog({ ...relationChange, operation });
       expect(
@@ -217,17 +220,6 @@ describe("relation review audit", () => {
     ).toThrow();
   });
 
-  it("retains a graph receipt after an aborted experience domain", () => {
-    const raw = relationLog(relationChange, {
-      outcome: "partially-applied",
-      changedRelationCount: 1,
-      relationBatchId: "batch-1",
-      relationOutcome: "applied",
-      experienceOutcome: "aborted",
-    });
-    expect(parseReviewLog(raw)).toEqual(raw);
-  });
-
   it.each([
     { changedRelationCount: -1 },
     {
@@ -240,7 +232,11 @@ describe("relation review audit", () => {
       relationBatchId: "batch-1",
       relationOutcome: "applied",
     },
-    { changedRelationCount: 1, relationOutcome: "applied" },
+    {
+      changedRelationCount: 1,
+      relationBatchId: undefined,
+      relationOutcome: "applied",
+    },
     {
       changedRelationCount: 1,
       relationBatchId: "",
@@ -278,20 +274,20 @@ describe("relation review audit", () => {
 });
 
 describe("review log", () => {
-  it("keeps a strict v8 audit contract", () => {
+  it("keeps a strict v9 audit contract", () => {
     expect(
       parseReviewLog({
-        schemaVersion: 8,
+        schemaVersion: 9,
         createdAt: "2026-06-11T00:00:00.000Z",
         updatedAt: "2026-06-11T00:00:00.000Z",
         processedEvents: {},
         reviewedSkillEpochs: {},
       }),
-    ).toMatchObject({ schemaVersion: 8 });
+    ).toMatchObject({ schemaVersion: 9 });
 
     expect(() =>
       parseReviewLog({
-        schemaVersion: 8,
+        schemaVersion: 9,
         createdAt: "2026-06-11T00:00:00.000Z",
         updatedAt: "2026-06-11T00:00:00.000Z",
         processedEvents: {},
@@ -304,7 +300,7 @@ describe("review log", () => {
   it("rejects retired native skill epochs", () => {
     expect(() =>
       parseReviewLog({
-        schemaVersion: 8,
+        schemaVersion: 9,
         createdAt: "2026-06-11T00:00:00.000Z",
         updatedAt: "2026-06-11T00:00:00.000Z",
         processedEvents: {},
@@ -323,206 +319,19 @@ describe("review log", () => {
     ).toThrow();
   });
 
-  it("accepts a reviewer-owned standalone delete operation", () => {
-    const parsed = parseReviewLog({
-      schemaVersion: 8,
-      createdAt: "2026-06-11T00:00:00.000Z",
-      updatedAt: "2026-06-11T00:00:00.000Z",
-      processedEvents: {
-        event: {
-          processedAt: "2026-06-11T00:01:00.000Z",
-          triggers: ["experience-health-check"],
-          changeCount: 1,
-          outcome: "applied",
-          changes: [
-            {
-              trigger: "experience-health-check",
-              targetKind: "skill-experience",
-              operation: "delete",
-              targetExperienceIds: ["obsolete"],
-              dedupeKey: "obsolete-experience",
-              summary: "Remove an obsolete experience.",
-              evidence: ["The catalog has a durable duplicate boundary."],
-              correctionGoal: "Remove the redundant runtime experience.",
-              suggestedChange: "Delete obsolete experience.",
-            },
-          ],
-        },
-      },
-      reviewedSkillEpochs: {},
-    });
-
-    expect(parsed.processedEvents.event?.changes?.[0]?.operation).toBe(
-      "delete",
-    );
+  it.each([7, 8, 10])("rejects unsupported log version %i", (schemaVersion) => {
+    expect(() => parseReviewLog({ ...relationLog(), schemaVersion })).toThrow();
   });
 
-  it("requires complete and coherent stored merge metadata", () => {
-    const change = {
-      trigger: "experience-health-check",
-      targetKind: "skill-experience",
-      operation: "merge",
-      sourceExperienceIds: ["obsolete"],
-      retainedExperienceId: "retained",
-      targetExperienceIds: ["obsolete", "retained"],
-      dedupeKey: "merge-experience",
-      summary: "Merge duplicate experiences.",
-      evidence: ["The procedures overlap."],
-      correctionGoal: "Keep one maintained workflow.",
-      suggestedChange: "Retain one experience and remove the source.",
-    };
-    const logWith = (value: Record<string, unknown>) => ({
-      schemaVersion: 8,
-      createdAt: "2026-06-11T00:00:00.000Z",
-      updatedAt: "2026-06-11T00:00:00.000Z",
-      processedEvents: {
-        event: {
-          processedAt: "2026-06-11T00:01:00.000Z",
-          triggers: ["experience-health-check"],
-          changeCount: 1,
-          outcome: "applied",
-          changes: [value],
-        },
-      },
-      reviewedSkillEpochs: {},
-    });
-
-    expect(parseReviewLog(logWith(change))).toBeDefined();
-    for (const invalid of [
-      (() => {
-        const value = { ...change };
-        delete (value as Partial<typeof change>).sourceExperienceIds;
-        return value;
-      })(),
-      { ...change, sourceExperienceIds: ["obsolete", "obsolete"] },
-      { ...change, retainedExperienceId: "obsolete" },
-      { ...change, operation: "delete", sourceExperienceIds: ["obsolete"] },
-    ]) {
-      expect(() => parseReviewLog(logWith(invalid))).toThrow();
-    }
-  });
-});
-
-describe("historical review audit compatibility", () => {
-  const legacyEvent = {
-    processedAt: "2026-06-11T00:01:00.000Z",
-    triggers: ["intent-health-check"],
-    changeCount: 1,
-    outcome: "applied",
-    changedIntentIds: ["build"],
-    changes: [
-      {
-        trigger: "intent-health-check",
-        targetKind: "intent-markdown",
-        operation: "merge",
-        targetIntentIds: ["build", "test"],
-        dedupeKey: "merge-build",
-        summary: "Merge workflows",
-        evidence: ["Same procedure"],
-        correctionGoal: "Remove duplication",
-        suggestedChange: "Merge entries",
-      },
-    ],
-  };
-  it("preserves legacy v8 intent audit entries and completed skill epochs", () => {
-    const raw = {
-      schemaVersion: 8,
-      createdAt: "2026-06-11",
-      updatedAt: "2026-06-11",
-      processedEvents: { previous: legacyEvent },
-      reviewedSkillEpochs: {
-        ["a".repeat(64)]: {
-          agentId: "main",
-          skillName: "writer",
-          source: "workspace",
-          reason: "low-adoption",
-          completedAt: "2026-06-11",
-          outcome: "nofinding",
-          eventId: "epoch",
-        },
-      },
-    };
-    expect(parseReviewLog(raw)).toEqual(raw);
-    expect(
-      parseReviewLog(JSON.parse(JSON.stringify(parseReviewLog(raw)))),
-    ).toEqual(raw);
-  });
-
-  it("migrates v7 while retaining historical records", () => {
-    const parsed = parseReviewLog({
-      schemaVersion: 7,
-      createdAt: "2026-06-11",
-      updatedAt: "2026-06-11",
-      processedEvents: { previous: legacyEvent },
-    });
-    expect(parsed.schemaVersion).toBe(8);
-    expect(parsed.processedEvents.previous).toEqual(legacyEvent);
-    expect(parsed.reviewedSkillEpochs).toEqual({});
-  });
-
-  it("migrates historical v7 trigger aliases and placement epochs, dropping retired keyword audits", () => {
-    const epochKey = "b".repeat(64);
-    const epoch = {
-      agentId: "main",
-      skillName: "writer",
-      source: "workspace",
-      reason: "zero-recommendation-usage",
-      completedAt: "2026-06-11",
-      outcome: "nofinding",
-      eventId: "previous",
-    };
-    const parsed = parseReviewLog({
-      schemaVersion: 7,
-      createdAt: "2026-06-11",
-      updatedAt: "2026-06-11",
-      processedEvents: {
-        previous: {
-          ...legacyEvent,
-          triggers: ["skill-placement"],
-          changes: [{ ...legacyEvent.changes[0], trigger: "skill-placement" }],
-        },
-        malformed: { processedAt: "not-a-record" },
-      },
-      reviewedSkillEpochs: { [epochKey]: epoch },
-      historicalKeywordAudits: {
-        keyword: { triggers: ["successful-pattern"] },
-      },
-    });
-    expect(parsed.processedEvents.previous).toMatchObject({
-      triggers: ["capability-fit"],
-      changes: [
-        { trigger: "capability-fit", targetIntentIds: ["build", "test"] },
-      ],
-    });
-    expect(parsed.processedEvents).not.toHaveProperty("malformed");
-    expect(parsed.reviewedSkillEpochs[epochKey]).toEqual({
-      ...epoch,
-      reason: "zero-intent-match-usage",
-    });
-    expect(parsed).not.toHaveProperty("historicalKeywordAudits");
-  });
-
-  it("preserves legacy experience records with their empty intent target array", () => {
-    const event = {
-      ...legacyEvent,
-      changes: [
-        {
-          ...legacyEvent.changes[0],
-          targetKind: "skill-experience",
-          operation: "create",
-          targetIntentIds: [],
-          targetExperienceIds: ["exp-one"],
-        },
-      ],
-    };
-    expect(
-      parseReviewLog({
-        schemaVersion: 8,
-        createdAt: "2026-06-11",
-        updatedAt: "2026-06-11",
-        processedEvents: { previous: event },
-        reviewedSkillEpochs: {},
-      }).processedEvents.previous,
-    ).toEqual(event);
-  });
+  it.each(["experience-health-check", "intent-health-check"])(
+    "rejects retired trigger %s",
+    (trigger) => {
+      expect(() =>
+        parseReviewLog(relationLog({ ...relationChange, trigger })),
+      ).toThrow();
+      expect(() =>
+        parseReviewLog(relationLog(relationChange, { triggers: [trigger] })),
+      ).toThrow();
+    },
+  );
 });

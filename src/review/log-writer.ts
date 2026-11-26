@@ -17,7 +17,6 @@ import {
   ReviewLogSchema,
   parseReviewLog,
   pruneReviewLogEvents,
-  type AppliedReviewChange,
   type NoFindingReasonCounts,
   type ProcessedEventOutcome,
   type SchemaRejectionReasonCounts,
@@ -26,43 +25,6 @@ import {
 import type { RelationPreparationSummary } from "./relations.js";
 import type { ReviewTrigger } from "./triggers.js";
 import { safeErrorClassification } from "../error-diagnostics.js";
-
-function appliedChangeFromFinding(finding: ReviewFinding): AppliedReviewChange {
-  const common = {
-    trigger: finding.trigger,
-    dedupeKey: finding.dedupeKey,
-    summary: finding.summary,
-    evidence: [...finding.evidence],
-    correctionGoal: finding.correctionGoal,
-    suggestedChange: finding.suggestedChange,
-  };
-  if (finding.targetKind === "skill-relation") {
-    return {
-      ...common,
-      targetKind: "skill-relation",
-      operation: finding.operation,
-      fromSkillId: finding.fromSkillId,
-      toSkillId: finding.toSkillId,
-      ...(finding.relationType !== undefined
-        ? { relationType: finding.relationType }
-        : {}),
-      ...(finding.reason !== undefined ? { reason: finding.reason } : {}),
-      relationEvidence: finding.relationEvidence.map((entry) => ({ ...entry })),
-    };
-  }
-  return {
-    ...common,
-    targetKind: "skill-experience",
-    operation: finding.operation,
-    targetExperienceIds: [...finding.targetExperienceIds],
-    ...(finding.operation === "merge"
-      ? {
-          sourceExperienceIds: [...finding.sourceExperienceIds],
-          retainedExperienceId: finding.retainedExperienceId,
-        }
-      : {}),
-  };
-}
 
 export class IntentReviewLogWriter {
   constructor(private readonly dataRoot: string) {}
@@ -85,17 +47,23 @@ export class IntentReviewLogWriter {
     }
   }
 
-  relationInspectionOffset(key: string): number {
-    const logPath = reviewLogPath(this.dataRoot);
-    if (!fileExists(logPath)) return 0;
+  /** A missing log starts a new inspection. Existing history must admit this event. */
+  inspectionOffsetsForEvent(
+    eventId: string,
+  ): ((key: string) => number) | undefined {
     try {
-      return (
-        parseReviewLog(readJsonFile<unknown>(logPath))
-          .relationInspectionCursors?.[key]?.offset ?? 0
+      const log = parseReviewLog(
+        readJsonFile<unknown>(reviewLogPath(this.dataRoot)),
       );
-    } catch {
-      // Reading a cursor cannot authorize replacement of an unreadable history.
-      return 0;
+      if (Object.hasOwn(log.processedEvents, eventId)) return;
+      return (key) => log.relationInspectionCursors?.[key]?.offset ?? 0;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return () => 0;
+      const diagnostic = safeErrorClassification(error);
+      logger.warn(
+        `skipping relation review: incompatible or unreadable log reason=${diagnostic.reason}`,
+      );
+      return;
     }
   }
 
@@ -107,13 +75,9 @@ export class IntentReviewLogWriter {
       nowMs?: number;
       triggers?: readonly ReviewTrigger[];
       outcome?: ProcessedEventOutcome;
-      changedIntentIds?: readonly string[];
-      changedExperienceIds?: readonly string[];
       changedRelationCount?: number;
       relationBatchId?: string;
       relationOutcome?: ReviewDomainOutcome;
-      experienceOutcome?: ReviewDomainOutcome;
-      partialExperienceIds?: readonly string[];
       validationErrors?: readonly string[];
       noFindingReasonCounts?: NoFindingReasonCounts;
       schemaRejectionReasonCounts?: SchemaRejectionReasonCounts;
@@ -136,7 +100,7 @@ export class IntentReviewLogWriter {
         pruneReviewLogEvents(log, options.nowMs ?? Date.now());
         if (Object.hasOwn(log.processedEvents, eventId)) return false;
 
-        const changes = findings.map(appliedChangeFromFinding);
+        const changes = [...findings];
         const outcome =
           options.outcome ?? (changes.length > 0 ? "applied" : "nofinding");
         log.processedEvents[eventId] = {
@@ -150,12 +114,6 @@ export class IntentReviewLogWriter {
           changeCount: changes.length,
           outcome,
           ...(changes.length > 0 ? { changes } : {}),
-          ...(options.changedIntentIds?.length
-            ? { changedIntentIds: [...options.changedIntentIds] }
-            : {}),
-          ...(options.changedExperienceIds?.length
-            ? { changedExperienceIds: [...options.changedExperienceIds] }
-            : {}),
           ...(options.changedRelationCount !== undefined
             ? { changedRelationCount: options.changedRelationCount }
             : {}),
@@ -164,12 +122,6 @@ export class IntentReviewLogWriter {
             : {}),
           ...(options.relationOutcome !== undefined
             ? { relationOutcome: options.relationOutcome }
-            : {}),
-          ...(options.experienceOutcome !== undefined
-            ? { experienceOutcome: options.experienceOutcome }
-            : {}),
-          ...(options.partialExperienceIds?.length
-            ? { partialExperienceIds: [...options.partialExperienceIds] }
             : {}),
           ...(options.validationErrors?.length
             ? { validationErrors: [...options.validationErrors] }
@@ -228,7 +180,7 @@ export class IntentReviewLogWriter {
       } catch (error) {
         const diagnostic = safeErrorClassification(error);
         logger.warn(
-          `failed to update v8 intent review log reason=${diagnostic.reason}${diagnostic.code ? ` code=${diagnostic.code}` : ""}`,
+          `failed to update relation review log reason=${diagnostic.reason}${diagnostic.code ? ` code=${diagnostic.code}` : ""}`,
         );
         return false;
       }

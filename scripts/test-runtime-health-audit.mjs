@@ -13,6 +13,28 @@ import { buildReport, isoTimestamp, sha256 } from "./runtime-health-audit.mjs";
 const SCRIPT = fileURLToPath(
   new URL("./runtime-health-audit.mjs", import.meta.url),
 );
+const REVIEW_SOURCE = {
+  sessionId: "session-1",
+  agentId: "main",
+  turnStart: "2026-08-01T00:00:00.000Z",
+};
+const NO_FINDING_EVENT = {
+  processedAt: REVIEW_SOURCE.turnStart,
+  source: REVIEW_SOURCE,
+  triggers: ["capability-fit"],
+  changeCount: 0,
+  outcome: "nofinding",
+};
+const SKIPPED_PREPARATION = {
+  status: "skipped",
+  reason: "no-seeds",
+  requestedSeeds: 0,
+  capturedSeeds: 0,
+  capturedExtras: 0,
+  existingNeighborAttempts: 0,
+  discoveryAttempts: 0,
+  skippedCaptureCount: 0,
+};
 const FIXTURE = {
   "stats.json": {
     schemaVersion: 7,
@@ -208,30 +230,45 @@ const FIXTURE = {
     },
   },
   "review.json": {
-    schemaVersion: 8,
+    schemaVersion: 9,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     processedEvents: {
       "event-1": {
-        processedAt: "2026-08-01T00:00:00.000Z",
-        triggers: ["capability-fit"],
+        ...NO_FINDING_EVENT,
         changeCount: 1,
         outcome: "applied",
+        changedRelationCount: 1,
+        relationOutcome: "applied",
+        relationBatchId: "batch-1",
         changes: [
           {
             trigger: "capability-fit",
-            targetKind: "skill-experience",
-            operation: "refine",
-            targetExperienceIds: ["example"],
-            targetIntentIds: ["example"],
+            targetKind: "skill-relation",
+            operation: "update",
+            fromSkillId: "first",
+            toSkillId: "second",
+            relationType: "related",
+            reason: "The procedures use the same inputs.",
+            relationEvidence: ["first", "second"].map((skillId) => ({
+              skillId,
+              filePath: "SKILL.md",
+              startLine: 1,
+              endLine: 1,
+              quote: "PRIVATE_EVIDENCE",
+            })),
+            dedupeKey: "update-example",
+            summary: "PRIVATE_REVIEW",
+            evidence: ["PRIVATE_EVIDENCE"],
+            correctionGoal: "Update the relation.",
+            suggestedChange: "PRIVATE_SUGGESTION",
           },
         ],
       },
       "event-2": {
+        ...NO_FINDING_EVENT,
         processedAt: "2026-08-01T00:01:00.000Z",
         triggers: ["routing-uncertainty"],
-        changeCount: 0,
-        outcome: "nofinding",
         noFindingReasonCounts: {
           "already-covered": 1,
         },
@@ -291,18 +328,11 @@ function runAudit() {
   assert.equal(fs.statSync(path.join(root, "report.json")).mode & 0o777, 0o600);
   return read("report.json");
 }
-function turn(
-  key = "turn",
-  date = "2026-08-01",
-  skills = [],
-  experiences = [],
-  used = [],
-) {
+function turn(key = "turn", date = "2026-08-01", skills = [], used = []) {
   return {
     turnKey: key,
     timestamps: { start: date + "T00:01:00Z", end: date + "T00:02:00Z" },
     matchedSkills: skills,
-    matchedExperiences: experiences,
     skillsUsed: used.map((name) => ({ name, path: "/private" })),
     confidence: 0.8,
     input: "SECRET_TRANSCRIPT",
@@ -311,12 +341,6 @@ function turn(
     inputSkillDiscovery: {
       candidateCount: 1,
       durationMs: 12,
-      experienceRetrieval: {
-        status: "completed",
-        candidateCount: 1,
-        minCandidateScore: 0.4,
-        hits: [{ id: "private-id", semanticScore: 0.7 }],
-      },
     },
   };
 }
@@ -335,10 +359,6 @@ beforeEach(() => {
   write("qmd/intents/keywords/example.md", "# keyword\n");
   write("qmd/intents/examples/example.md", "# example\n");
   database("qmd/intents/intent-routing.sqlite");
-  write("experiences/example/summary.md", "Example summary\n");
-  write("experiences/example/keywords.md", "example\n");
-  write("experiences/example/body.md", "Example body\n");
-  write("experiences/example/skills.md", "example-skill\n");
   writeSession({ timestamps: { end: "2026-08-01T00:02:00.000Z" } });
   write("agents/review/sessions/agent.session.jsonl", "{}\n");
 });
@@ -361,27 +381,12 @@ test("reports health without private runtime text and writes private atomic outp
     averagePerAppliedEvent: 1,
     eventsByChangeCount: { 0: 1, 1: 1 },
     byTrigger: { "capability-fit": 1 },
-    byOperation: { refine: 1 },
-    topTargetExperiences: [{ experience: "example", changes: 1 }],
-    topTargetIntents: [{ intent: "example", changes: 1 }],
+    byOperation: { update: 1 },
   });
   assert.equal(r.runtime.sessions.sessionFiles, 1);
   assert.equal(r.runtime.sessions.agentArtifactFiles, 1);
-  assert.equal(r.runtime.experiences.count, 1);
-  assert.equal(r.runtime.experiences.markdownFiles, 4);
   assert.equal(r.runtime.intents.markdownFiles, 1);
-  const { skills, ...qmd } = r.runtime.qmd;
-  assert.deepEqual(qmd, {
-    databaseStatus: "ready",
-    integrityCheck: "ok",
-    generation: 2,
-    leaseActive: false,
-    snapshotMarkdownFiles: 2,
-    indexedDocuments: 2,
-    indexedVectors: 2,
-    documentsMatchVectors: true,
-    snapshotMatchesIndexedDocuments: true,
-  });
+  assert.deepEqual(Object.keys(r.runtime.qmd), ["skills"]);
   assert.deepEqual(Object.keys(r.provenance.stateSha256).sort(), [
     "review.json",
     "stats.json",
@@ -419,20 +424,8 @@ test("reports health without private runtime text and writes private atomic outp
   assert.equal("routingEffectiveness" in stats, false);
   assert.equal("projectionEfficiency" in stats, false);
 });
-test("unavailable QMD does not fail the audit", () => {
-  remove("qmd/intents/intent-routing.sqlite");
-  const { skills, ...qmd } = runAudit().runtime.qmd;
-  assert.deepEqual(qmd, {
-    databaseStatus: "unavailable",
-    integrityCheck: null,
-    generation: null,
-    leaseActive: null,
-    snapshotMarkdownFiles: 2,
-    indexedDocuments: null,
-    indexedVectors: null,
-    documentsMatchVectors: null,
-    snapshotMatchesIndexedDocuments: null,
-  });
+test("missing skill indexes leave the report available", () => {
+  assert.equal(runAudit().runtime.qmd.skills.indexCount, 0);
 });
 test("route scores are weighted and inventory remains aggregate", () => {
   update("stats.json", (s) => {
@@ -483,7 +476,7 @@ test("route scores are weighted and inventory remains aggregate", () => {
   assert.equal("dailyDynamicKeyCardinality" in stats.dataHealth, false);
 });
 for (const [name, version, expected] of [
-  ["review.json", 5, "schema-v8"],
+  ["review.json", 8, "schema-v9"],
   ["stats.json", 5, "schema-v7"],
 ]) {
   test(`rejects non-current ${name}`, () => {
@@ -494,17 +487,6 @@ for (const [name, version, expected] of [
     assert.equal(r.stdout, "");
   });
 }
-test("pure experience layout uses the current database", () => {
-  remove("intents");
-  remove("qmd/intents");
-  write("qmd/experiences/doc1.md", "# Doc 1\n");
-  database("qmd/experiences/experience-routing.sqlite", 1, 1);
-  const r = runAudit();
-  assert.equal(r.runtime.intents.markdownFiles, 0);
-  assert.equal(r.runtime.experiences.count, 1);
-  assert.equal(r.runtime.qmd.generation, 1);
-  assert.equal(r.runtime.qmd.snapshotMatchesIndexedDocuments, true);
-});
 test("windows distinguish missing metrics and do not claim accuracy", () => {
   const r = report();
   const recent = r.analysis.windows.recent;
@@ -526,15 +508,17 @@ test("windows distinguish missing metrics and do not claim accuracy", () => {
     false,
   );
 });
-test("session deduplication supports experience-only injection and privacy", () => {
-  writeSession(turn("turn", undefined, [], ["private-id"], ["manual"]), [
-    turn("turn", undefined, ["DISCARDED_SKILL"], [], ["DISCARDED_SKILL"]),
+test("deduplicates mixed pre-retirement and skill-only sessions", () => {
+  writeSession(turn("turn", undefined, [], ["manual"]), [
+    {
+      ...turn("turn", undefined, ["DISCARDED_SKILL"], ["DISCARDED_SKILL"]),
+      matchedExperiences: ["private-id"],
+    },
   ]);
   const r = report();
   const s = r.analysis.windows.recent.sessions;
   assert.equal(s.routedTurns, 1);
-  assert.equal(s.selection.nonEmptyWithoutInjection.rate, 0);
-  assert.equal(s.experienceRetrieval.selectedFromNonEmpty.rate, 1);
+  assert.equal(s.selection.nonEmptyWithoutInjection.rate, 1);
   assert.equal(s.skills.topUsedWithoutInjection[0].skill, "manual");
   assert.equal(r.analysis.sessionDataQuality.duplicateTurns, 1);
   for (const secret of [
@@ -550,9 +534,7 @@ test("session deduplication supports experience-only injection and privacy", () 
 test("completed history precedes incomplete current", () => {
   const pending = turn("turn", undefined, ["pending"]);
   delete pending.timestamps.end;
-  writeSession(pending, [
-    turn("turn", undefined, ["verified"], [], ["verified"]),
-  ]);
+  writeSession(pending, [turn("turn", undefined, ["verified"], ["verified"])]);
   const s = report().analysis.windows.recent.sessions;
   assert.equal(s.skills.topUsed[0].skill, "verified");
   assert.equal(s.completeUsageTurns, 1);
@@ -560,7 +542,6 @@ test("completed history precedes incomplete current", () => {
 test("empty and unknown pools retain separate denominators and invalid turn counts", () => {
   const empty = turn("empty");
   empty.inputSkillDiscovery.candidateCount = 0;
-  empty.inputSkillDiscovery.experienceRetrieval.candidateCount = 0;
   const unknown = turn("unknown");
   delete unknown.inputSkillDiscovery.candidateCount;
   const invalid = turn("invalid");
@@ -582,27 +563,6 @@ test("empty and unknown pools retain separate denominators and invalid turn coun
   assert.equal(r.analysis.sessionDataQuality.invalidTimestamps, 1);
   assert.equal(r.analysis.sessionDataQuality.unidentifiedTurns, 1);
 });
-test("experience statuses and missing score observations are preserved", () => {
-  const rows = ["completed", "disabled", "unavailable", "timeout", "error"].map(
-    (status) => {
-      const row = turn(status);
-      row.inputSkillDiscovery.experienceRetrieval = { status };
-      return row;
-    },
-  );
-  writeSession(rows[0], rows.slice(1));
-  const r = report().analysis.windows.recent.sessions.experienceRetrieval;
-  assert.deepEqual(r.statuses, {
-    completed: 1,
-    disabled: 1,
-    unavailable: 1,
-    timeout: 1,
-    error: 1,
-  });
-  assert.equal(r.candidateCount, null);
-  assert.equal(r.hitCount, null);
-  assert.equal(r.hitTurns.rate, null);
-});
 test("relation-only selection is not QMD evidence", () => {
   update("stats.json", (s) => {
     s.skillDiscovery.qmdSearch = {
@@ -621,7 +581,7 @@ test("relation-only selection is not QMD evidence", () => {
       injectedSkills: 1,
     };
   });
-  const t = turn("turn", undefined, ["related-skill"], [], ["related-skill"]);
+  const t = turn("turn", undefined, ["related-skill"], ["related-skill"]);
   Object.assign(t.inputSkillDiscovery, {
     relatedCandidates: 1,
     retrievalCandidates: 0,
@@ -705,14 +665,14 @@ test("review multi-trigger outcomes count committed changes only", () => {
       ].map((outcome) => [
         outcome,
         {
-          processedAt: "2026-08-01T00:00:00Z",
+          ...(outcome === "applied"
+            ? r.processedEvents["event-1"]
+            : NO_FINDING_EVENT),
           outcome,
           triggers: ["capability-fit", "routing-uncertainty"],
-          changes: [{ trigger: "capability-fit", operation: "create" }],
-          summary: "PRIVATE_REVIEW",
-          evidence: ["PRIVATE_EVIDENCE"],
-          schemaRejectionReasonCounts:
-            outcome === "schema-rejected" ? { "missing-target": 1 } : {},
+          ...(outcome === "schema-rejected"
+            ? { schemaRejectionReasonCounts: { "missing-target": 1 } }
+            : {}),
         },
       ]),
     );
@@ -724,45 +684,21 @@ test("review multi-trigger outcomes count committed changes only", () => {
   assert.deepEqual(r.schemaRejectionReasons, { "missing-target": 1 });
   assert.equal(JSON.stringify(r).includes("PRIVATE"), false);
 });
-test("merge/delete counts leave historical operations unclassified", () => {
-  update("review.json", (r) => {
-    r.processedEvents = {
-      operations: {
-        processedAt: "2026-08-01T00:00:00Z",
-        outcome: "applied",
-        triggers: ["capability-fit"],
-        changes: [
-          {
-            trigger: "capability-fit",
-            operation: "merge",
-            targetExperienceIds: ["kept", "source"],
-            sourceExperienceIds: ["source"],
-            retainedExperienceId: "kept",
-          },
-          {
-            trigger: "capability-fit",
-            operation: "delete",
-            targetExperienceIds: ["obsolete"],
-          },
-          { trigger: "capability-fit", targetExperienceIds: ["historical"] },
-        ],
-      },
-    };
-  });
-  const r = report().analysis.windows.recent.review;
-  assert.deepEqual(r.changes.byOperation, { merge: 1, delete: 1 });
-  assert.equal(r.changes.total, 3);
-});
 test("relation inspection separates reported proposals from committed operations", () => {
   update("review.json", (r) => {
     r.processedEvents = {
       proposed: {
+        ...NO_FINDING_EVENT,
         processedAt: "2026-08-01T00:00:00Z",
         outcome: "validation-failed",
         relationPreparation: {
           status: "ready",
+          requestedSeeds: 2,
           capturedSeeds: 2,
           capturedExtras: 3,
+          existingNeighborAttempts: 2,
+          discoveryAttempts: 1,
+          skippedCaptureCount: 0,
         },
         relationReview: {
           existing: "no-change",
@@ -771,11 +707,15 @@ test("relation inspection separates reported proposals from committed operations
         relationSearchCount: 2,
       },
       skipped: {
+        ...NO_FINDING_EVENT,
         processedAt: "2026-08-01T00:01:00Z",
-        outcome: "nofinding",
-        relationPreparation: { status: "skipped", reason: "no-eligible-seeds" },
+        outcome: "skipped",
+        relationPreparation: {
+          ...SKIPPED_PREPARATION,
+          reason: "no-eligible-seeds",
+        },
       },
-      historical: { processedAt: "2026-08-01T00:02:00Z", outcome: "nofinding" },
+      historical: { ...NO_FINDING_EVENT, processedAt: "2026-08-01T00:02:00Z" },
     };
   });
   const r = report().runtime.review.processedEvents.relationInspection;
@@ -789,80 +729,60 @@ test("relation inspection separates reported proposals from committed operations
     eventsWithoutPreparation: 1,
   });
 });
-test("partial reviews preserve committed findings across every summary", () => {
+test("a skipped preparation is counted separately from completed reviews", () => {
   update("review.json", (r) => {
-    r.processedEvents.partial = {
-      processedAt: "2026-08-01T00:02:00Z",
-      outcome: "partially-applied",
-      triggers: ["capability-fit", "routing-uncertainty"],
-      changeCount: 2,
-      changes: [
-        {
-          trigger: "capability-fit",
-          targetKind: "skill-relation",
-          operation: "update",
-          fromSkillId: "PRIVATE_ENDPOINT_FROM",
-          toSkillId: "PRIVATE_ENDPOINT_TO",
-          reason: "PRIVATE_REASON",
-          relationEvidence: [{ quote: "PRIVATE_QUOTE" }],
-        },
-        {
-          trigger: "capability-fit",
-          targetKind: "skill-experience",
-          operation: "create",
-          targetExperienceIds: ["completed-entry"],
-        },
-      ],
-      changedRelationCount: 1,
-      relationBatchId: "PRIVATE_BATCH",
-      relationOutcome: "applied",
-      experienceOutcome: "partial",
-      changedExperienceIds: ["completed-entry", "incomplete-entry"],
-      partialExperienceIds: ["incomplete-entry"],
-    };
-    r.processedEvents.failed = {
-      processedAt: "2026-08-01T00:03:00Z",
-      outcome: "validation-failed",
-      triggers: ["capability-fit"],
-      changes: [
-        {
-          trigger: "capability-fit",
-          operation: "delete",
-          targetExperienceIds: ["uncommitted-entry"],
-        },
-      ],
+    r.processedEvents = {
+      completed: NO_FINDING_EVENT,
+      skipped: {
+        ...NO_FINDING_EVENT,
+        processedAt: "2026-08-01T01:00:00Z",
+        outcome: "skipped",
+        relationPreparation: SKIPPED_PREPARATION,
+      },
     };
   });
-  const r = report();
-  const summaries = [
-    r.runtime.review.processedEvents,
-    r.analysis.cumulative.review,
-    r.analysis.windows.recent.review,
+  const review = report().analysis.windows.recent.review;
+  assert.equal(review.skippedPreparations, 1);
+  assert.equal(review.eventCount, 1);
+  assert.deepEqual(review.outcomeRates.nofinding, {
+    numerator: 1,
+    denominator: 1,
+    rate: 1,
+  });
+  assert.equal(review.lastCompletedAt, NO_FINDING_EVENT.processedAt);
+  update("review.json", (r) => delete r.processedEvents.completed);
+  const skipOnly = report().analysis.windows.recent.review;
+  assert.equal(skipOnly.skippedPreparations, 1);
+  assert.equal(skipOnly.eventCount, 0);
+  assert.equal(skipOnly.outcomeRates.nofinding.rate, null);
+  assert.equal(skipOnly.lastCompletedAt, null);
+});
+test("rejects invalid v9 receipts even outside the reporting window without exposing private data", () => {
+  const applied = FIXTURE["review.json"].processedEvents["event-1"];
+  const malformed = [
+    { ...applied, relationBatchId: undefined },
+    { ...applied, changedRelationCount: 7 },
+    { ...NO_FINDING_EVENT, relationPreparation: SKIPPED_PREPARATION },
+    { ...NO_FINDING_EVENT, outcome: "skipped" },
+    { ...NO_FINDING_EVENT, triggers: ["experience-health-check"] },
+    { ...NO_FINDING_EVENT, PRIVATE_UNKNOWN_FIELD: "PRIVATE_VALUE" },
   ];
-  for (const s of summaries) {
-    assert.equal(s.eventCount, 4);
-    assert.equal(s.outcomes["partially-applied"], 1);
-    assert.equal(s.changes.total, 3);
-    assert.equal(s.changes.appliedEvents, 2);
-    assert.equal(s.changes.averagePerAppliedEvent, 1.5);
-    assert.deepEqual(s.changes.byOperation, {
-      refine: 1,
-      create: 1,
-      update: 1,
+  for (const event of malformed) {
+    update("review.json", (r) => {
+      r.processedEvents.PRIVATE_EVENT_ID = {
+        ...event,
+        processedAt: "2026-01-01T00:00:00.000Z",
+      };
     });
-    assert.deepEqual(
-      s.changes.topTargetExperiences.map((row) => row.experience).sort(),
-      ["completed-entry", "example"],
-    );
-    for (const secret of ["incomplete-entry", "uncommitted-entry", "PRIVATE_"])
-      assert.equal(JSON.stringify(s).includes(secret), false);
+    assert.throws(() => report(), {
+      message: "review.json must be a valid schema-v9 review log",
+    });
   }
-  for (const s of summaries.slice(1))
-    assert.deepEqual(s.outcomeRates["partially-applied"], {
-      numerator: 1,
-      denominator: 4,
-      rate: 0.25,
-    });
+  const result = cli(["--stdout"]);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /schema-v9/);
+  assert.doesNotMatch(result.stderr, /PRIVATE/);
 });
 test("multiple skill indexes aggregate failures without exposing names", () => {
   for (const name of ["secret-one", "secret-two", "missing", "corrupt"])
@@ -919,10 +839,6 @@ test("CLI rejects invalid days and mutually exclusive outputs", () => {
 });
 test("nested symlink directories are not traversed and linked skill indexes are excluded", () => {
   fs.symlinkSync(
-    path.join(root, "experiences/example"),
-    path.join(root, "experiences/link"),
-  );
-  fs.symlinkSync(
     path.join(root, "qmd/intents"),
     path.join(root, "qmd/intents/keywords/loop"),
   );
@@ -932,9 +848,6 @@ test("nested symlink directories are not traversed and linked skill indexes are 
     path.join(root, "qmd/skills/indexes/link"),
   );
   const r = report();
-  assert.equal(r.runtime.experiences.count, 2);
-  assert.equal(r.runtime.experiences.markdownFiles, 4);
-  assert.equal(r.runtime.qmd.snapshotMarkdownFiles, 2);
   assert.equal(r.runtime.qmd.skills.indexCount, 0);
 });
 test("invalid calendar timestamps are rejected without normalizing into observations", () => {
