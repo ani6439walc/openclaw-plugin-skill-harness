@@ -257,6 +257,20 @@ const association = {
 };
 const tool = { toolName: "read", params: {}, result: "tool output" };
 
+function settleRun(
+  handlers: ReturnType<typeof createHookHandlers>,
+  runId: string,
+) {
+  return handlers.onAgentLifecycleEvent({
+    ...ctx,
+    runId,
+    stream: "lifecycle",
+    seq: 1,
+    ts: Date.now(),
+    data: { phase: "end", executionSettled: true },
+  });
+}
+
 describe("SDK run correlation contract", () => {
   it.each([
     { eventRunId: "other-run", contextRunId: undefined },
@@ -278,6 +292,7 @@ describe("SDK run correlation contract", () => {
         { ...ctx, runId: contextRunId },
       );
       expect(h.merge).not.toHaveBeenCalled();
+      await settleRun(h.handlers, contextRunId ?? eventRunId!);
       expect(h.finalize).not.toHaveBeenCalled();
     },
   );
@@ -293,6 +308,7 @@ describe("SDK run correlation contract", () => {
       { runId: "old-run", success: true, messages: [] },
       { ...ctx, runId: "old-run" },
     );
+    await settleRun(h.handlers, "old-run");
     expect(h.finalize).not.toHaveBeenCalled();
   });
 
@@ -328,6 +344,7 @@ describe("SDK run correlation contract", () => {
         { ...ctx, runId },
       );
       expect(h.merge).not.toHaveBeenCalled();
+      await settleRun(h.handlers, runId);
       expect(h.finalize).not.toHaveBeenCalled();
     },
   );
@@ -352,6 +369,56 @@ describe("SDK run correlation contract", () => {
       );
     },
   );
+
+  it("pins a new alias only after both session identifiers match", async () => {
+    const registry = new TurnAssociationRegistry();
+    bind(registry, association);
+    const h = correlationHarness(registry);
+    const runId = "observed-alias";
+    await h.handlers.onAfterToolCall(
+      { ...tool, runId },
+      { ...ctx, runId: undefined, sessionKey: "mismatch" },
+    );
+    expect(registry.hasRun(runId)).toBe(false);
+    expect(h.merge).not.toHaveBeenCalled();
+    await h.handlers.onAfterToolCall(
+      { ...tool, runId },
+      { ...ctx, runId: undefined },
+    );
+    expect(registry.resolve(runId)).toEqual(association);
+
+    bind(registry, { ...association, turnKey: "next-turn" });
+    expect(registry.resolveSession(ctx.sessionId)).toBeUndefined();
+    expect(registry.resolve(runId)).toEqual(association);
+    await h.handlers.onAfterToolCall(
+      { ...tool, runId: "unseen" },
+      { ...ctx, runId: undefined },
+    );
+    expect(h.merge).toHaveBeenCalledOnce();
+    expect(registry.hasRun("unseen")).toBe(false);
+    registry.markAssociationTerminal(association);
+    expect(registry.hasRun(runId)).toBe(true);
+    expect(registry.resolve(runId)).toBeUndefined();
+    await h.handlers.onAfterToolCall(
+      { ...tool, runId: "unseen" },
+      { ...ctx, runId: undefined },
+    );
+    expect(h.merge).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedTurnKey: "next-turn" }),
+    );
+  });
+
+  it("refuses anonymous alias attribution without space for a run fence", async () => {
+    const registry = new TurnAssociationRegistry({ maxEntries: 1 });
+    bind(registry, association);
+    const h = correlationHarness(registry);
+    await h.handlers.onAfterToolCall(
+      { ...tool, runId: "overflow" },
+      { ...ctx, runId: undefined },
+    );
+    expect(h.merge).not.toHaveBeenCalled();
+    expect(registry.hasRun("overflow")).toBe(false);
+  });
 
   it("does not guess an anonymous owner when distinct sessions share a key", async () => {
     const registry = new TurnAssociationRegistry();

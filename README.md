@@ -392,7 +392,7 @@ Skill-index refresh warnings include a JSON diagnostic suffix with the index fin
 
 Inventory failure diagnostics identify the root category, operation phase and fixed error classification. Private paths and source content are excluded.
 
-An `agent_end` taking 25 seconds emits one slow warning with its current finalization, inventory, statistics or Review-preparation phase. If it later settles, a completion message records elapsed time and outcome. This observes slow work without cancelling it or extending the host timeout; an unsettled warning alone does not prove the cause of a timeout.
+The plugin keeps the turn open through provider fallback attempts and finalizes it when OpenClaw publishes the settled run outcome. Statistics and Review cadence use that outcome. Finalization taking 25 seconds emits one slow warning with its current phase (finalization, inventory, statistics, or Review preparation). If the work finishes after the warning, a completion message records elapsed time and outcome. The timer only reports progress.
 
 ### Verify relation Review after an upgrade
 

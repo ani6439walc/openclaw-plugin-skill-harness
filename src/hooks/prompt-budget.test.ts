@@ -91,6 +91,19 @@ async function until(predicate: () => boolean) {
   }
   throw new Error("Fixture did not reach expected stage");
 }
+function settleRun(
+  handlers: ReturnType<typeof createHookHandlers>,
+  context: Pick<typeof ctx, "runId" | "sessionId" | "sessionKey">,
+) {
+  return handlers.onAgentLifecycleEvent({
+    ...context,
+    stream: "lifecycle",
+    seq: 1,
+    ts: Date.now(),
+    data: { phase: "end", executionSettled: true },
+  });
+}
+
 function fixture(existingRoot?: string) {
   const root =
     existingRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), "prompt-budget-"));
@@ -276,6 +289,7 @@ describe("native admission identity", () => {
       { messages: [{ role: "assistant", content: "done" }], success: true },
       ctx,
     );
+    await settleRun(f.handlers, ctx);
     const prepare = vi.spyOn(f.tracker, "preparePromptTurn");
     const replay = await f.handlers.onBeforePromptBuild(admitted, {
       ...ctx,
@@ -314,6 +328,7 @@ describe("native admission identity", () => {
     expect(f.turnAssociations.resolve(replayCtx.runId)?.turnKey).toBe(oldTurn);
     expect(f.selector).toHaveBeenCalledTimes(2);
     await f.handlers.onAgentEnd({ messages: [], success: true }, replayCtx);
+    await settleRun(f.handlers, replayCtx);
     expect(
       f.tracker.getTurnState(ctx.sessionId, oldTurn)?.timestamps?.end,
     ).toBeTruthy();
@@ -328,6 +343,67 @@ describe("native admission identity", () => {
         message.startsWith("before_prompt_build hook error"),
       ),
     ).toBe(false);
+  });
+
+  it("settles a pinned anonymous predecessor in history and leaves its successor open", async () => {
+    const f = fixture();
+    const anonymousCtx = { ...ctx, runId: undefined };
+    const firstCtx = { ...ctx, runId: "anonymous:observed-first" };
+    const secondCtx = { ...ctx, runId: "unseen-second" };
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "first" },
+      anonymousCtx,
+    );
+    const firstKey = f.tracker.getCurrentState(ctx.sessionId)!.turnKey!;
+    await f.handlers.onBeforeToolCall(
+      { toolName: "read", params: {}, runId: firstCtx.runId },
+      firstCtx,
+    );
+    expect(f.turnAssociations.resolve(firstCtx.runId)?.turnKey).toBe(firstKey);
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "second" },
+      anonymousCtx,
+    );
+    const secondKey = f.tracker.getCurrentState(ctx.sessionId)!.turnKey;
+    expect(secondKey).not.toBe(firstKey);
+
+    await settleRun(f.handlers, secondCtx);
+    expect(f.turnAssociations.hasRun(secondCtx.runId)).toBe(false);
+    expect(
+      f.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+    ).toBeUndefined();
+    await f.handlers.onAgentEnd(
+      {
+        success: true,
+        messages: [{ role: "assistant", content: "first answer" }],
+      },
+      firstCtx,
+    );
+    await settleRun(f.handlers, firstCtx);
+    expect(f.tracker.getTurnState(ctx.sessionId, firstKey)).toMatchObject({
+      result: "first answer",
+      timestamps: { end: expect.any(String) },
+    });
+    expect(f.turnAssociations.hasRun(firstCtx.runId)).toBe(true);
+    expect(f.turnAssociations.resolve(firstCtx.runId)).toBeUndefined();
+    await settleRun(f.handlers, firstCtx);
+    expect(
+      f.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+    ).toBeUndefined();
+
+    await f.handlers.onAgentEnd(
+      {
+        success: true,
+        messages: [{ role: "assistant", content: "second answer" }],
+      },
+      secondCtx,
+    );
+    await settleRun(f.handlers, secondCtx);
+    expect(f.tracker.getCurrentState(ctx.sessionId)).toMatchObject({
+      turnKey: secondKey,
+      result: "second answer",
+      timestamps: { end: expect.any(String) },
+    });
   });
 
   it.each(["unavailable", "error"] as const)(
@@ -360,12 +436,154 @@ describe("native admission identity", () => {
     },
   );
 
+  it.each([
+    { kind: "legacy", hostKey: "agent:main:direct:current", sdkKey: undefined },
+    { kind: "legacy", hostKey: "", sdkKey: undefined },
+    { kind: "native", hostKey: "agent:main:direct:current", sdkKey: undefined },
+    { kind: "native", hostKey: "", sdkKey: "agent:main:direct:sdk" },
+  ])(
+    "binds $kind replay using the current host or SDK key ($hostKey/$sdkKey)",
+    async ({ kind, hostKey, sdkKey }) => {
+      const before = fixture();
+      const admitted =
+        kind === "native"
+          ? { ...event, currentUserMessageId: "key-replay" }
+          : event;
+      await before.handlers.onBeforePromptBuild(admitted, ctx);
+      const turnKey = before.tracker.getCurrentState(ctx.sessionId)?.turnKey;
+      expect(turnKey).toBeTruthy();
+      await before.handlers.disposePromptWork();
+
+      const after = fixture(before.root);
+      after.sessionLookup.mockResolvedValue(
+        sdkKey
+          ? { sessionKey: sdkKey, entry: { sessionId: ctx.sessionId } }
+          : undefined,
+      );
+      if (kind === "legacy" && hostKey) {
+        after.setConfig(
+          resolveConfig({
+            routing: {
+              scope: {
+                allowedChatIds: ["webchat:direct:current"],
+              },
+            },
+          }),
+        );
+      }
+      const expectedKey = hostKey || sdkKey || ctx.sessionKey;
+      await after.handlers.onBeforePromptBuild(admitted, {
+        ...ctx,
+        sessionKey: hostKey,
+      });
+      expect(after.turnAssociations.resolve(ctx.runId)).toMatchObject({
+        turnKey,
+        sessionKey: expectedKey,
+      });
+      await after.handlers.onAgentEnd(
+        {
+          success: true,
+          messages: [{ role: "assistant", content: "replayed answer" }],
+        },
+        { ...ctx, sessionKey: expectedKey },
+      );
+      await after.handlers.onAgentLifecycleEvent({
+        ...ctx,
+        sessionKey: expectedKey,
+        stream: "lifecycle",
+        seq: 1,
+        ts: Date.now(),
+        data: { phase: "end", executionSettled: true },
+      });
+      expect(after.tracker.getCurrentState(ctx.sessionId)).toMatchObject({
+        turnKey,
+        result: "replayed answer",
+        timestamps: { end: expect.any(String) },
+      });
+    },
+  );
+
+  it.each(["host", "SDK"] as const)(
+    "uses the current %s key to bind a retained native replay behind a newer admission",
+    async (source) => {
+      const before = fixture();
+      const admitted = { ...event, currentUserMessageId: "retained" };
+      await before.handlers.onBeforePromptBuild(admitted, ctx);
+      const retained = before.tracker.getCurrentState(ctx.sessionId)!.turnKey!;
+      await before.handlers.disposePromptWork();
+
+      const after = fixture(before.root);
+      await after.handlers.onBeforePromptBuild(
+        { ...event, currentUserMessageId: "newer" },
+        { ...ctx, runId: "newer-run" },
+      );
+      const newer = after.tracker.getCurrentState(ctx.sessionId)!.turnKey;
+      const newKey = "agent:main:direct:current";
+      after.sessionLookup.mockResolvedValue({
+        sessionKey: newKey,
+        entry: { sessionId: ctx.sessionId },
+      });
+      const replayCtx = {
+        ...ctx,
+        runId: "retained-run",
+        sessionKey: source === "host" ? newKey : "",
+      };
+      await after.handlers.onBeforePromptBuild(admitted, replayCtx);
+      expect(after.turnAssociations.resolve(replayCtx.runId)).toMatchObject({
+        turnKey: retained,
+        sessionKey: newKey,
+      });
+      expect(after.tracker.getCurrentState(ctx.sessionId)?.turnKey).toBe(newer);
+
+      await settleRun(after.handlers, { ...replayCtx, sessionKey: newKey });
+      expect(
+        after.tracker.getTurnState(ctx.sessionId, retained)?.timestamps?.end,
+      ).toBeTruthy();
+      expect(
+        after.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+      ).toBeUndefined();
+    },
+  );
+
+  it("keeps a replay terminal if its turn settles while the canonical key lookup waits", async () => {
+    const f = fixture();
+    const first = { ...event, currentUserMessageId: "first" };
+    await f.handlers.onBeforePromptBuild(first, ctx);
+    const firstTurnKey = f.tracker.getCurrentState(ctx.sessionId)!.turnKey!;
+    await f.handlers.onBeforePromptBuild(
+      { ...event, currentUserMessageId: "newer" },
+      { ...ctx, runId: "newer-run" },
+    );
+    const lookup = deferred<
+      { sessionKey: string; entry: { sessionId: string } } | undefined
+    >(undefined);
+    f.sessionLookup.mockReturnValueOnce(lookup.promise);
+    const pending = f.handlers.onBeforePromptBuild(first, {
+      ...ctx,
+      sessionKey: "",
+      runId: "late-replay",
+    });
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+    await settleRun(f.handlers, ctx);
+    expect(
+      f.tracker.getTurnState(ctx.sessionId, firstTurnKey)?.timestamps?.end,
+    ).toBeTruthy();
+    lookup.resolve({
+      sessionKey: ctx.sessionKey,
+      entry: { sessionId: ctx.sessionId },
+    });
+    await pending;
+    expect(f.turnAssociations.hasRun("late-replay")).toBe(true);
+    expect(f.turnAssociations.resolve("late-replay")).toBeUndefined();
+  });
+
   it.each(["current", "history"] as const)(
     "keeps a finalized legacy run from %s terminal after reload",
     async (location) => {
       const before = fixture();
       await before.handlers.onBeforePromptBuild(event, ctx);
       await before.handlers.onAgentEnd({ messages: [], success: true }, ctx);
+      await settleRun(before.handlers, ctx);
       if (location === "history")
         await before.handlers.onBeforePromptBuild(event, {
           ...ctx,
@@ -567,6 +785,7 @@ describe("asynchronous prompt identity", () => {
       },
       ctx,
     );
+    await settleRun(f.handlers, ctx);
     expect(finalize).not.toHaveBeenCalled();
     expect(
       f.tracker.getCurrentState("session")?.timestamps?.end,
@@ -594,6 +813,7 @@ describe("asynchronous prompt identity", () => {
       },
       ctx,
     );
+    await settleRun(f.handlers, ctx);
     expect(finalize).not.toHaveBeenCalled();
     lookup.resolve(match);
     expect((await second)?.prependContext).toContain('<skill name="fixture">');
@@ -762,6 +982,7 @@ describe("prompt routing deadlines", () => {
         },
         ctx,
       );
+      await settleRun(f.handlers, ctx);
       expect(
         f.tracker.getTurnState("session", "turn")?.timestamps?.end,
       ).toBeTruthy();

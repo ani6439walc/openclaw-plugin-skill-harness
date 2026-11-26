@@ -73,6 +73,23 @@ function createHandlers(
   } as never);
 }
 
+async function completeAgentTurn(
+  handlers: ReturnType<typeof createHookHandlers>,
+  event: Parameters<typeof handlers.onAgentEnd>[0],
+  ctx: Parameters<typeof handlers.onAgentEnd>[1],
+) {
+  await handlers.onAgentEnd(event, ctx);
+  await handlers.onAgentLifecycleEvent({
+    stream: "lifecycle",
+    seq: 1,
+    ts: Date.now(),
+    runId: event.runId ?? ctx.runId ?? "settled-run",
+    sessionId: ctx.sessionId,
+    sessionKey: ctx.sessionKey,
+    data: { phase: "end", executionSettled: true },
+  });
+}
+
 function createMockReviewScheduler() {
   let runner:
     ((candidate: any, signal: AbortSignal) => Promise<void>) | undefined;
@@ -308,12 +325,27 @@ describe("createHookHandlers tracking guards", () => {
         const second = tracker.getCurrentState(ctx.sessionId)!;
         expect(second.turnKey).not.toBe(first.turnKey);
         expect(
-          turnAssociations.resolveAnonymousSession(ctx.sessionId)?.turnKey,
-        ).toBe(second.turnKey);
+          turnAssociations.resolveAnonymousSession(ctx.sessionId),
+        ).toBeUndefined();
         expect(turnAssociations.resolveSession(ctx.sessionKey)?.turnKey).toBe(
           second.turnKey,
         );
-        await handlers.onAgentEnd({ messages: [], success: true }, ctx);
+        await completeAgentTurn(handlers, { messages: [], success: true }, ctx);
+        expect(
+          tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+        ).toBeUndefined();
+        // An explicit host run binding can still complete the successor.
+        bindAssociation(turnAssociations, {
+          sessionId: ctx.sessionId,
+          sessionKey: ctx.sessionKey,
+          turnKey: second.turnKey!,
+          runId: "second-run",
+        });
+        await completeAgentTurn(
+          handlers,
+          { messages: [], success: true },
+          { ...ctx, runId: "second-run" },
+        );
         expect(
           tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
         ).toBeTruthy();
@@ -325,6 +357,283 @@ describe("createHookHandlers tracking guards", () => {
         await handlers.reviewScheduler.dispose();
         fs.rmSync(root, { recursive: true, force: true });
       }
+    },
+  );
+
+  it("reuses a native admission across provider fallback and records Review cadence once", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "settled-fallback-"));
+    const tracker = SessionTracker.create(root);
+    const statsAggregator = StatsAggregator.create(root);
+    const record = vi.spyOn(statsAggregator, "record");
+    const toolFallbacks = new ToolFallbackRegistry();
+    const scheduler = createMockReviewScheduler();
+    const getReviewModelRef = vi.fn(() => ({
+      provider: "fixture",
+      model: "review",
+    }));
+    const handlers = createHandlers(
+      {
+        config: {},
+        runtime: { agent: { resolveAgentWorkspaceDir: () => root } },
+      },
+      {
+        config: () =>
+          resolveConfig({
+            review: {
+              enabled: true,
+              triggers: { relationHealthCheck: { everyTurns: 1 } },
+            },
+          }),
+        tracker,
+        statsAggregator,
+        toolFallbacks,
+        skillInventoryResolver: async () => [],
+        reviewScheduler: scheduler,
+        loadReviewSubagent: async () => ({
+          getReviewModelRef,
+          runReviewSubagent: vi.fn(),
+        }),
+      },
+    );
+    const ctx = {
+      sessionId: "fallback-session",
+      sessionKey: "agent:main:main",
+      agentId: "main",
+      messageProvider: "webchat",
+      trigger: "user",
+      runId: "fallback-run",
+    };
+    const prompt = {
+      prompt: "Run the manual workflow",
+      messages: [],
+      currentUserMessageId: "admission",
+    };
+    const state = () => tracker.getCurrentState(ctx.sessionId);
+    try {
+      await handlers.onBeforePromptBuild(prompt, ctx);
+      const turnKey = state()?.turnKey;
+      expect(turnKey).toBeTruthy();
+      expect(state()?.matchedSkills).toEqual([]);
+      toolFallbacks.stage("primary-tool", {
+        association: { sessionId: ctx.sessionId, turnKey: turnKey! },
+        fallback: {
+          toolCallId: "primary-tool",
+          name: "exec",
+          params: {},
+          result: "done",
+          success: true,
+        },
+      });
+      await handlers.onAgentEnd(
+        { success: false, error: "primary failed", messages: [] },
+        ctx,
+      );
+      expect(state()?.timestamps?.end).toBeUndefined();
+      expect(state()?.skillTurnNumber).toBeUndefined();
+      expect(state()?.toolCalls).toMatchObject([
+        { toolCallId: "primary-tool" },
+      ]);
+      expect(toolFallbacks.get("primary-tool")).toBeUndefined();
+      expect(record).not.toHaveBeenCalled();
+      expect(scheduler.schedule).not.toHaveBeenCalled();
+      const fallbackCtx = { ...ctx, runId: "fallback-alias" };
+      await handlers.onBeforePromptBuild(prompt, fallbackCtx);
+      expect(state()?.turnKey).toBe(turnKey);
+      await handlers.onAfterToolCall(
+        {
+          toolName: "skill_view",
+          params: { name: "manual" },
+          result: JSON.stringify({
+            success: true,
+            name: "manual",
+            content: "Instructions",
+            path: "/skills/manual/SKILL.md",
+          }),
+        },
+        fallbackCtx,
+      );
+      const assertActive = vi.fn(() => {
+        throw new Error("attempt invocation expired");
+      });
+      await handlers.onAgentEnd(
+        {
+          success: true,
+          messages: [{ role: "assistant", content: "fallback answer" }],
+        },
+        {
+          ...fallbackCtx,
+          hookInvocation: { assertActive } as never,
+          modelProviderId: "fallback-provider",
+          modelId: "fallback-model",
+        },
+      );
+      expect(state()?.timestamps?.end).toBeUndefined();
+      expect(state()?.skillTurnNumber).toBeUndefined();
+      expect(record).not.toHaveBeenCalled();
+      expect(scheduler.schedule).not.toHaveBeenCalled();
+      const settled = {
+        ...fallbackCtx,
+        stream: "lifecycle" as const,
+        seq: 1,
+        ts: Date.now(),
+        data: { phase: "end", executionSettled: true },
+      };
+      await handlers.onAgentLifecycleEvent(settled);
+      await handlers.onAgentLifecycleEvent(settled);
+      expect(state()).toMatchObject({
+        turnKey,
+        result: "fallback answer",
+        skillsUsed: [{ name: "manual" }],
+        timestamps: { end: expect.any(String) },
+      });
+      expect(state()?.error).toBeUndefined();
+      expect(
+        tracker.getReviewSnapshotForTurn(ctx.sessionId, turnKey!)?.turnNumber,
+      ).toBe(1);
+      expect(record).toHaveBeenCalledOnce();
+      expect(statsAggregator.listProcessedEventIds().size).toBe(1);
+      expect(scheduler.schedule).toHaveBeenCalledOnce();
+      expect(getReviewModelRef).toHaveBeenCalledWith(
+        expect.anything(),
+        "main",
+        expect.anything(),
+        {
+          modelProviderId: "fallback-provider",
+          modelId: "fallback-model",
+        },
+      );
+      expect(assertActive).not.toHaveBeenCalled();
+    } finally {
+      await handlers.disposePromptWork();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      label: "failed attempt",
+      attempt: true,
+      data: { phase: "error" },
+      error: "attempt error",
+      result: "attempt reply",
+    },
+    {
+      label: "lifecycle error overrides the attempt",
+      attempt: true,
+      data: { phase: "error", error: "provider error" },
+      error: "provider error",
+      result: "attempt reply",
+    },
+    {
+      label: "preflight failure",
+      data: { phase: "error", error: "preflight error" },
+      error: "preflight error",
+    },
+    {
+      label: "restart abort",
+      data: { phase: "end", aborted: true, stopReason: "restart" },
+      error: "restart",
+    },
+    {
+      label: "provider timeout",
+      data: { phase: "end", timeoutPhase: "provider" },
+      error: "hard_timeout",
+    },
+    {
+      label: "terminal reply after failed attempt",
+      attempt: true,
+      data: {
+        phase: "end",
+        terminalReply: { disposition: "visible", text: "  terminal answer  " },
+      },
+      result: "terminal answer",
+    },
+    {
+      label: "terminal reply after an empty successful attempt",
+      attempt: "empty",
+      data: {
+        phase: "end",
+        terminalReply: { disposition: "visible", text: "terminal answer" },
+      },
+      result: "terminal answer",
+    },
+    {
+      label: "terminal reply without an attempt",
+      data: {
+        phase: "end",
+        terminalReply: { disposition: "visible", text: "terminal answer" },
+      },
+      result: "terminal answer",
+    },
+  ])(
+    "settles $label after ignoring intermediate lifecycle events",
+    async ({ attempt, data, error, result }) => {
+      const { handlers, finalizeTurn } = createFinalizedTurnHarness({});
+      const ctx = { sessionId: "session-1", runId: "settled-run" };
+      const lifecycle = {
+        ...ctx,
+        stream: "lifecycle" as const,
+        seq: 1,
+        ts: 1234,
+      };
+      if (attempt) {
+        await handlers.onAgentEnd(
+          {
+            success: attempt === "empty",
+            error: attempt === "empty" ? undefined : "attempt error",
+            messages:
+              attempt === "empty"
+                ? []
+                : [{ role: "assistant", content: "attempt reply" }],
+          },
+          ctx,
+        );
+      }
+      for (const intermediate of [
+        {
+          ...lifecycle,
+          stream: "assistant" as const,
+          data: { phase: "end", executionSettled: true },
+        },
+        { ...lifecycle, data: { phase: "end" } },
+        { ...lifecycle, data: { phase: "start", executionSettled: true } },
+        {
+          ...lifecycle,
+          data: {
+            phase: "end",
+            executionSettled: true,
+            yielded: true,
+            livenessState: "paused",
+            stopReason: "end_turn",
+          },
+        },
+        {
+          ...lifecycle,
+          runId: " ",
+          data: { phase: "end", executionSettled: true },
+        },
+      ]) {
+        await handlers.onAgentLifecycleEvent(intermediate);
+      }
+      expect(finalizeTurn).not.toHaveBeenCalled();
+
+      await handlers.onAgentLifecycleEvent({
+        ...lifecycle,
+        data: {
+          ...data,
+          executionSettled: true,
+          endedAt: attempt ? 2345 : Number.NaN,
+        },
+      });
+      expect(finalizeTurn).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sessionId: ctx.sessionId,
+          expectedTurnKey: "run-1",
+          error,
+          result,
+          endedAt: new Date(attempt ? 2345 : 1234).toISOString(),
+        }),
+      );
     },
   );
 
@@ -908,7 +1217,8 @@ description: Navigate Tokyo.
     const { handlers, finalizeTurn, getTurnState } =
       createFinalizedTurnHarness(state);
 
-    await handlers.onAgentEnd(
+    await completeAgentTurn(
+      handlers,
       { messages: [{ role: "assistant", content: "done" }] } as never,
       { sessionId: "session-1" },
     );
@@ -925,7 +1235,7 @@ description: Navigate Tokyo.
   });
 
   it.each(["finalize", "inventory"] as const)(
-    "observes a slow agent_end %s without cancelling finalization",
+    "observes a slow lifecycle %s without cancelling finalization",
     async (phase) => {
       vi.useFakeTimers();
       const warn = vi.fn();
@@ -953,7 +1263,7 @@ description: Navigate Tokyo.
           gate.then(() => "applied" as const),
         );
       try {
-        const running = handlers.onAgentEnd({ messages: [] } as never, {
+        const running = completeAgentTurn(handlers, { messages: [] } as never, {
           sessionId: "session-1",
         });
         await vi.advanceTimersByTimeAsync(24_999);
@@ -962,7 +1272,7 @@ description: Navigate Tokyo.
         expect(warn).toHaveBeenCalledTimes(1);
         const message = warn.mock.calls[0]![0] as string;
         expect(JSON.parse(message.slice(message.indexOf("{")))).toMatchObject({
-          hook: "agent_end",
+          hook: "agent_lifecycle",
           phase,
           elapsedMs: 25_000,
         });
@@ -983,17 +1293,17 @@ description: Navigate Tokyo.
     },
   );
 
-  it("clears the slow warning after normal and already-finalized agent_end", async () => {
+  it("clears the slow warning after normal and already-finalized lifecycle", async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(logger, "warn");
     const { handlers, finalizeTurn } = createFinalizedTurnHarness({});
     vi.spyOn(defaultStatsAggregator, "record").mockReturnValue(false);
     try {
-      await handlers.onAgentEnd({ messages: [] } as never, {
+      await completeAgentTurn(handlers, { messages: [] } as never, {
         sessionId: "session-1",
       });
       finalizeTurn.mockResolvedValue("already-finalized");
-      await handlers.onAgentEnd({ messages: [] } as never, {
+      await completeAgentTurn(handlers, { messages: [] } as never, {
         sessionId: "session-1",
       });
       await vi.advanceTimersByTimeAsync(30_000);
@@ -1004,7 +1314,7 @@ description: Navigate Tokyo.
     }
   });
 
-  it("records only classified agent_end errors and preserves rejection", async () => {
+  it("records only classified lifecycle errors and preserves rejection", async () => {
     vi.useFakeTimers();
     const warn = vi.fn();
     setApiLogger({ warn: (message) => warn(message) });
@@ -1016,14 +1326,14 @@ description: Navigate Tokyo.
     finalizeTurn.mockRejectedValue(error);
     try {
       await expect(
-        handlers.onAgentEnd({ messages: [] } as never, {
+        completeAgentTurn(handlers, { messages: [] } as never, {
           sessionId: "session-1",
         }),
       ).rejects.toBe(error);
       expect(warn).toHaveBeenCalledTimes(1);
       const message = warn.mock.calls[0]![0] as string;
       expect(JSON.parse(message.slice(message.indexOf("{")))).toMatchObject({
-        hook: "agent_end",
+        hook: "agent_lifecycle",
         phase: "finalize",
         reason: "operation-failed",
       });
@@ -1037,7 +1347,7 @@ description: Navigate Tokyo.
     }
   });
 
-  it("passes every staged fallback for the exact turn through one agent_end finalization", async () => {
+  it("passes every staged fallback for the exact turn through one settled finalization", async () => {
     const state = {
       input: "read two skills",
       timestamps: { start: "2026-06-11T00:00:00.000Z" },
@@ -1062,10 +1372,14 @@ description: Navigate Tokyo.
       deps: { toolFallbacks },
     });
 
-    await handlers.onAgentEnd({ messages: [] } as never, {
+    const merge = vi
+      .spyOn(defaultTracker, "mergeTurnAndPersist")
+      .mockResolvedValue("retryable-failure");
+    await completeAgentTurn(handlers, { messages: [] } as never, {
       sessionId: "session-1",
     });
 
+    expect(merge).toHaveBeenCalledTimes(2);
     expect(finalizeTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "session-1",
@@ -1111,10 +1425,10 @@ description: Navigate Tokyo.
       .mockResolvedValueOnce("applied")
       .mockResolvedValueOnce("already-finalized");
 
-    await handlers.onAgentEnd({ messages: [] } as never, {
+    await completeAgentTurn(handlers, { messages: [] } as never, {
       sessionId: "session-1",
     });
-    await handlers.onAgentEnd({ messages: [] } as never, {
+    await completeAgentTurn(handlers, { messages: [] } as never, {
       sessionId: "session-1",
     });
 
@@ -1149,9 +1463,10 @@ description: Navigate Tokyo.
     const { handlers, finalizeTurn } = createFinalizedTurnHarness(state, {
       deps: { toolFallbacks },
     });
+    vi.spyOn(defaultTracker, "mergeTurnAndPersist").mockResolvedValue("stale");
     finalizeTurn.mockResolvedValue("already-finalized");
 
-    await handlers.onAgentEnd({ messages: [] } as never, {
+    await completeAgentTurn(handlers, { messages: [] } as never, {
       sessionId: "session-1",
     });
 
@@ -1203,7 +1518,7 @@ description: Navigate Tokyo.
     expect(mergeTurn).not.toHaveBeenCalled();
   });
 
-  it("aggregates agent_end using the prepared turn bound to sessionKey", async () => {
+  it("aggregates settled lifecycle using the prepared turn bound to sessionKey", async () => {
     const state = {
       input: "read skill-harness",
       intent: {
@@ -1235,7 +1550,8 @@ description: Navigate Tokyo.
       sessionKey,
     });
 
-    await handlers.onAgentEnd(
+    await completeAgentTurn(
+      handlers,
       { messages: [{ role: "assistant", content: "done" }] } as never,
       { sessionKey } as never,
     );
@@ -1285,7 +1601,8 @@ description: Navigate Tokyo.
       deps: { skillInventoryResolver: resolveInventory },
     });
 
-    await handlers.onAgentEnd(
+    await completeAgentTurn(
+      handlers,
       { messages: [{ role: "assistant", content: "done" }] } as never,
       { sessionId: "tracked-session", agentId: "agent-b" } as never,
     );
@@ -1334,7 +1651,8 @@ description: Navigate Tokyo.
       },
     });
 
-    await handlers.onAgentEnd(
+    await completeAgentTurn(
+      handlers,
       { messages: [{ role: "assistant", content: "done" }] } as never,
       { sessionId: "tracked-session", agentId: "agent-a" } as never,
     );
@@ -1364,7 +1682,8 @@ description: Navigate Tokyo.
     vi.spyOn(defaultStatsAggregator, "isRecordable").mockReturnValue(false);
     const recordStats = vi.spyOn(defaultStatsAggregator, "record");
 
-    await createHandlers({}, { skillInventoryResolver: resolver }).onAgentEnd(
+    await completeAgentTurn(
+      createHandlers({}, { skillInventoryResolver: resolver }),
       { messages: [{ role: "assistant", content: "done" }] } as never,
       { sessionId: "event-session", agentId: "agent-a" } as never,
     );
@@ -1405,7 +1724,8 @@ description: Navigate Tokyo.
       vi.spyOn(defaultCatalog, "get").mockReturnValue([]);
       const recordStats = vi.spyOn(defaultStatsAggregator, "record");
 
-      await createHandlers({}, { skillInventoryResolver: resolver }).onAgentEnd(
+      await completeAgentTurn(
+        createHandlers({}, { skillInventoryResolver: resolver }),
         { messages: [{ role: "assistant", content: "done" }] } as never,
         { sessionId: "event-session", agentId: "agent-a" } as never,
       );
@@ -1464,7 +1784,8 @@ description: Navigate Tokyo.
       .spyOn(defaultStatsAggregator, "record")
       .mockReturnValue(true);
 
-    await createHandlers(api).onAgentEnd(
+    await completeAgentTurn(
+      createHandlers(api),
       { messages: [{ role: "assistant", content: "done" }] } as never,
       { sessionId: "stale-event-session", agentId: "main" },
     );
@@ -1475,11 +1796,11 @@ description: Navigate Tokyo.
     expect(finalizeTurn).not.toHaveBeenCalled();
   });
 
-  it("does not aggregate agent_end without a tracked current turn", async () => {
+  it("does not aggregate lifecycle without a tracked current turn", async () => {
     vi.spyOn(defaultTracker, "hasIntentData").mockReturnValue(false);
     const recordStats = vi.spyOn(defaultStatsAggregator, "record");
 
-    await createHandlers().onAgentEnd({ messages: [] } as never, {});
+    await completeAgentTurn(createHandlers(), { messages: [] } as never, {});
 
     expect(recordStats).not.toHaveBeenCalled();
   });
@@ -1555,7 +1876,7 @@ description: Navigate Tokyo.
         },
       },
     });
-    const finishing = handlers.onAgentEnd(
+    await handlers.onAgentEnd(
       { messages: [] } as never,
       {
         sessionId: "session-1",
@@ -1567,6 +1888,15 @@ description: Navigate Tokyo.
         },
       } as never,
     );
+    if (scenario === "expired-hook") expired = true;
+    const finishing = handlers.onAgentLifecycleEvent({
+      stream: "lifecycle",
+      runId: "settled-run",
+      sessionId: "session-1",
+      seq: 1,
+      ts: Date.now(),
+      data: { phase: "end", executionSettled: true },
+    });
     if (scenario === "disabled" || scenario === "no-trigger") {
       await finishing;
       expect(loadReviewSubagent).not.toHaveBeenCalled();
@@ -1577,13 +1907,12 @@ description: Navigate Tokyo.
       await vi.waitFor(() => expect(loadReviewSubagent).toHaveBeenCalledOnce());
       if (scenario === "aborted") controller.abort();
       if (scenario === "disposed") disposed = true;
-      if (scenario === "expired-hook") expired = true;
       if (scenario === "missing-turn") getSnapshot.mockReturnValue(undefined);
     } finally {
       release(module);
       await finishing;
     }
-    if (scenario !== "active") {
+    if (scenario !== "active" && scenario !== "expired-hook") {
       expect(scheduler.schedule).not.toHaveBeenCalled();
       expect(module.runReviewSubagent).not.toHaveBeenCalled();
     } else {
@@ -1661,7 +1990,7 @@ description: Navigate Tokyo.
             },
             ctx,
           );
-        await handlers.onAgentEnd({ messages: [], success: true }, ctx);
+        await completeAgentTurn(handlers, { messages: [], success: true }, ctx);
 
         expect(search).not.toHaveBeenCalled();
         expect(routingSelector).not.toHaveBeenCalled();
@@ -1783,7 +2112,8 @@ description: Navigate Tokyo.
               { ...ctx, runId },
             ),
           end: (runId: string) =>
-            handlers.onAgentEnd(
+            completeAgentTurn(
+              handlers,
               { messages: [], success: true },
               { ...ctx, runId },
             ),
@@ -1938,7 +2268,7 @@ description: Navigate Tokyo.
       turnAssociations,
     });
 
-    await handlers.onAgentEnd({ messages: [] } as never, {
+    await completeAgentTurn(handlers, { messages: [] } as never, {
       sessionId: "session-1",
       agentId: "main",
     });
@@ -2048,7 +2378,7 @@ description: Navigate Tokyo.
           dataRoot,
           turnAssociations: seedAssociation(),
         });
-        await handlers.onAgentEnd({ messages: [] } as never, {
+        await completeAgentTurn(handlers, { messages: [] } as never, {
           sessionId: "session-1",
           agentId: "main",
         });

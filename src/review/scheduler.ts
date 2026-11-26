@@ -3,6 +3,7 @@ import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import type { ReviewSnapshot } from "./types.js";
 import type { PluginHookAgentContext } from "../hooks/types.js";
+import type { TurnAssociationRegistry } from "../hooks/turn-associations.js";
 import type { BackgroundRunner } from "../subagent-runtime.js";
 
 export const INTENT_REVIEW_DEFAULT_IDLE_MS = 30_000;
@@ -26,6 +27,16 @@ export function resolveReviewSessionKey(
     candidate.ctx.sessionKey?.trim() ||
     candidate.snapshot.sessionKey?.trim() ||
     undefined
+  );
+}
+
+export function isReviewSessionActive(
+  turnAssociations: TurnAssociationRegistry,
+  candidate: ReviewCandidate,
+): boolean {
+  return (
+    turnAssociations.hasActiveSession(resolveReviewSessionKey(candidate)) ||
+    turnAssociations.hasActiveSession(candidate.snapshot.sessionId)
   );
 }
 

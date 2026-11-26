@@ -9,13 +9,16 @@ export interface TurnAssociation {
 
 interface AssociationEntry {
   association?: TurnAssociation;
-  state: "reserved" | "pending" | "active" | "terminal" | "ambiguous";
+  state:
+    "reserved" | "pending" | "active" | "superseded" | "terminal" | "ambiguous";
   touchedAt: number;
   token?: string;
   ownerToken?: object;
   sessionId?: string;
+  anonymous?: boolean;
   nativeFence?: boolean;
   nativeBudget?: boolean;
+  pinnedAnonymousRun?: boolean;
 }
 
 type ReservationResult =
@@ -157,6 +160,7 @@ export class TurnAssociationRegistry {
         : { status: "ambiguous" };
     }
     if (existing?.state === "terminal") {
+      if (existing.pinnedAnonymousRun) return { status: "ambiguous" };
       existing.state = "ambiguous";
       existing.touchedAt = now;
       delete existing.association;
@@ -195,6 +199,7 @@ export class TurnAssociationRegistry {
     }
     const token = randomUUID();
     this.entries.set(`anonymous:${token}`, {
+      anonymous: true,
       state: "reserved",
       touchedAt: now,
       token,
@@ -227,14 +232,20 @@ export class TurnAssociationRegistry {
   ): "bound" | "stale" {
     const key = `anonymous:${token}`;
     const entry = this.entries.get(key);
-    if (!entry || entry.state !== "reserved" || entry.token !== token) {
+    if (
+      !entry?.anonymous ||
+      entry.state !== "reserved" ||
+      entry.token !== token
+    ) {
       return "stale";
     }
     const duplicate = [...this.entries.entries()].find(
       ([candidateKey, candidate]) =>
         candidateKey !== key &&
         !candidate.nativeFence &&
-        (candidate.state === "active" || candidate.state === "terminal") &&
+        (candidate.state === "active" ||
+          candidate.state === "superseded" ||
+          candidate.state === "terminal") &&
         sameTurnAssociation(candidate.association, association),
     );
     if (duplicate) {
@@ -244,15 +255,15 @@ export class TurnAssociationRegistry {
     }
     const now = this.now();
     if (!association.finalized) {
-      for (const [candidateKey, candidate] of this.entries) {
+      for (const candidate of this.entries.values()) {
         if (
-          candidateKey.startsWith("anonymous:") &&
+          candidate.anonymous &&
           !candidate.nativeFence &&
           candidate.state === "active" &&
           candidate.association?.sessionId === association.sessionId &&
           candidate.association.turnKey !== association.turnKey
         ) {
-          candidate.state = "terminal";
+          candidate.state = "superseded";
           candidate.touchedAt = now;
         }
       }
@@ -277,6 +288,7 @@ export class TurnAssociationRegistry {
       entry.touchedAt = this.now();
       return "bound";
     }
+    if (entry.pinnedAnonymousRun) return "ambiguous";
     entry.state = "ambiguous";
     entry.touchedAt = this.now();
     delete entry.association;
@@ -307,14 +319,52 @@ export class TurnAssociationRegistry {
     return { ...entry.association };
   }
 
+  pinAnonymousRun(runId: string, association: TurnAssociation): boolean {
+    const key = normalizeTurnAssociationKey(runId);
+    if (!key || this.entries.has(key) || !this.allowUnknownRunFallback)
+      return false;
+    const now = this.now();
+    this.prune(now);
+    if (
+      this.entries.size - this.nativeEntries >= this.maxEntries &&
+      !this.evictOldestEligible()
+    )
+      return false;
+    this.entries.set(key, {
+      association: { ...association },
+      state: "active",
+      touchedAt: now,
+      // A delayed event must never become an unknown alias within this session.
+      pinnedAnonymousRun: true,
+    });
+    return true;
+  }
+
+  hasActiveSession(sessionIdentity: string | undefined): boolean {
+    const normalized = normalizeTurnAssociationKey(sessionIdentity);
+    if (!normalized) return false;
+    for (const entry of this.entries.values()) {
+      if (
+        (entry.state === "active" &&
+          (entry.association?.sessionId === normalized ||
+            entry.association?.sessionKey === normalized)) ||
+        (entry.nativeFence &&
+          entry.state === "pending" &&
+          entry.sessionId === normalized)
+      )
+        return true;
+    }
+    return false;
+  }
+
   resolveAnonymousSession(
     sessionIdentity: string | undefined,
   ): TurnAssociation | undefined {
     const normalizedSessionIdentity = sessionIdentity?.trim();
     if (!normalizedSessionIdentity) return;
     const distinct = new Map<string, TurnAssociation>();
-    for (const [key, entry] of this.entries) {
-      if (!key.startsWith("anonymous:") || entry.nativeFence) continue;
+    for (const entry of this.entries.values()) {
+      if (!entry.anonymous || entry.nativeFence) continue;
       const association = entry.association;
       if (
         entry.state !== "active" ||
@@ -332,9 +382,12 @@ export class TurnAssociationRegistry {
     if (distinct.size !== 1) return;
     const association = [...distinct.values()][0];
     for (const entry of this.entries.values()) {
-      if (sameTurnAssociation(entry.association, association)) {
-        entry.touchedAt = this.now();
-      }
+      if (
+        entry.state !== "terminal" &&
+        entry.association?.sessionId === association.sessionId &&
+        !sameTurnAssociation(entry.association, association)
+      )
+        return;
     }
     return { ...association };
   }
@@ -404,6 +457,7 @@ export class TurnAssociationRegistry {
     for (const [key, entry] of this.entries) {
       if (
         !entry.nativeFence &&
+        !entry.pinnedAnonymousRun &&
         (entry.state === "terminal" || entry.state === "ambiguous") &&
         now - entry.touchedAt > this.idleTtlMs
       ) {
@@ -415,7 +469,7 @@ export class TurnAssociationRegistry {
   private evictOldestEligible(): boolean {
     let oldest: { key: string; touchedAt: number } | undefined;
     for (const [key, entry] of this.entries) {
-      if (entry.nativeFence) continue;
+      if (entry.nativeFence || entry.pinnedAnonymousRun) continue;
       if (entry.state !== "terminal" && entry.state !== "ambiguous") continue;
       if (!oldest || entry.touchedAt < oldest.touchedAt) {
         oldest = { key, touchedAt: entry.touchedAt };

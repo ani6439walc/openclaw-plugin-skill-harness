@@ -571,15 +571,60 @@ describe("createPlugin", () => {
     expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
   });
 
-  it("shares prompt turn activity with Review until agent_end, including tools after an outbound preamble", async () => {
+  it("defers Review for multiple active admissions and pending session-ID fences", () => {
     const createScheduler = vi.spyOn(
       reviewScheduling,
       "createIntentReviewScheduler",
     );
+    const api = createApi();
+    createPlugin(api).register(api);
+    const { turnAssociations } = createHookHandlersSpy.mock.calls[0][0];
+    const isSystemActive = createScheduler.mock.calls[0][0]!.isSystemActive!;
+    const sessionId = "busy-session";
+    const sessionKey = "agent:main:main";
+    const sparse = { ctx: {}, snapshot: { sessionId } } as ReviewCandidate;
+    const canonical = { ...sparse, sessionKey };
+    const turns = ["older-replay", "current"].map((turnKey) => ({
+      turnKey,
+      sessionId,
+      sessionKey,
+    }));
+    for (const turn of turns) {
+      const owner = {};
+      turnAssociations.claimNativeRun(turn.turnKey, owner, sessionId);
+      expect(isSystemActive(sparse)).toBe(true);
+      expect(isSystemActive(canonical)).toBe(true);
+      turnAssociations.bindNativeRun(turn.turnKey, owner, turn);
+    }
+    expect(turnAssociations.resolveSession(sessionKey)).toBeUndefined();
+    expect(isSystemActive(canonical)).toBe(true);
+    expect(isSystemActive(sparse)).toBe(true);
+    turnAssociations.markAssociationTerminal(turns[0]);
+    expect(isSystemActive(sparse)).toBe(true);
+    turnAssociations.markAssociationTerminal(turns[1]);
+    expect(isSystemActive(sparse)).toBe(false);
+    expect(isSystemActive(canonical)).toBe(false);
+  });
+
+  it("shares prompt turn activity with Review until settled lifecycle, including tools after an outbound preamble", async () => {
+    const createScheduler = vi.spyOn(
+      reviewScheduling,
+      "createIntentReviewScheduler",
+    );
+    const registerAgentEventSubscription = vi.fn();
     const api = createApi({
+      agent: {
+        events: { registerAgentEventSubscription },
+      } as OpenClawPluginApi["agent"],
       pluginConfig: { routing: { skills: { maxInjectedSkills: 0 } } },
     });
     createPlugin(api).register(api);
+    expect(registerAgentEventSubscription).toHaveBeenCalledExactlyOnceWith({
+      id: "skill-harness:lifecycle",
+      streams: ["lifecycle"],
+      phases: ["end", "error"],
+      handle: expect.any(Function),
+    });
     const isSystemActive = createScheduler.mock.calls[0][0]?.isSystemActive;
     expect(isSystemActive).toBeTypeOf("function");
     const deps = createHookHandlersSpy.mock.calls[0][0];
@@ -587,6 +632,7 @@ describe("createPlugin", () => {
       api.on.mock.calls.find(([event]) => event === name)?.[1];
     const ctx = {
       agentId: "main",
+      runId: "preamble-run",
       sessionId: "preamble-session",
       sessionKey: "agent:main:main",
       messageProvider: "webchat",
@@ -595,7 +641,7 @@ describe("createPlugin", () => {
     const candidate = {
       sessionKey: "",
       ctx: { sessionKey: " " },
-      snapshot: { sessionKey: ctx.sessionKey },
+      snapshot: { sessionId: ctx.sessionId, sessionKey: ctx.sessionKey },
     } as ReviewCandidate;
     expect(isSystemActive!(candidate)).toBe(false);
     await hook("before_prompt_build")(
@@ -628,6 +674,14 @@ describe("createPlugin", () => {
       { messages: [{ role: "assistant", content: "Done." }], success: true },
       ctx,
     );
+    expect(isSystemActive!(candidate)).toBe(true);
+    await registerAgentEventSubscription.mock.calls[0][0].handle({
+      ...ctx,
+      stream: "lifecycle",
+      seq: 1,
+      ts: Date.now(),
+      data: { phase: "end", executionSettled: true },
+    });
     expect(
       deps.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
     ).toBeTruthy();

@@ -349,7 +349,58 @@ describe("TurnAssociationRegistry", () => {
     });
     const current = { sessionId: "session-a", turnKey: "turn-b" };
     expect(registry.resolveSession("session-a")).toEqual(current);
+    expect(registry.resolveAnonymousSession("session-a")).toBeUndefined();
+    registry.markAssociationTerminal({
+      sessionId: "session-a",
+      turnKey: "turn-a",
+    });
     expect(registry.resolveAnonymousSession("session-a")).toEqual(current);
+  });
+
+  it("detects busy sessions with multiple active turns and pending native fences", () => {
+    const registry = new TurnAssociationRegistry();
+    const first = {
+      sessionId: "session-a",
+      sessionKey: "canonical",
+      turnKey: "one",
+    };
+    const second = { ...first, turnKey: "two" };
+    for (const turn of [first, second]) {
+      const owner = {};
+      registry.claimNativeRun(turn.turnKey, owner, turn.sessionId);
+      expect(registry.hasActiveSession(" session-a ")).toBe(true);
+      registry.bindNativeRun(turn.turnKey, owner, turn);
+    }
+    expect(registry.resolveSession("canonical")).toBeUndefined();
+    expect(registry.hasActiveSession("canonical")).toBe(true);
+    registry.markAssociationTerminal(first);
+    expect(registry.hasActiveSession("canonical")).toBe(true);
+    registry.markAssociationTerminal(second);
+    expect(registry.hasActiveSession("canonical")).toBe(false);
+    expect(registry.hasActiveSession("session-a")).toBe(false);
+  });
+
+  it("keeps unfinished anonymous predecessors through TTL and capacity pressure", () => {
+    let now = 0;
+    const registry = new TurnAssociationRegistry({
+      maxEntries: 2,
+      idleTtlMs: 10,
+      now: () => now,
+    });
+    const first = { sessionId: "session-a", turnKey: "one" };
+    for (const turnKey of ["one", "two"]) {
+      const reservation = registry.reserveAnonymous();
+      if (reservation.status !== "reserved")
+        throw new Error("expected reservation");
+      registry.bindAnonymous(reservation.token, { ...first, turnKey });
+    }
+    now = 100;
+    expect(registry.reserve("extra")).toEqual({ status: "full" });
+    expect(registry.resolveAnonymousSession(first.sessionId)).toBeUndefined();
+    registry.markAssociationTerminal(first);
+    expect(registry.reserve("extra").status).toBe("reserved");
+    registry.removeSession(first.sessionId);
+    expect(registry.resolveSession(first.sessionId)).toBeUndefined();
   });
 
   it("resolves a unique live turn by canonical session key", () => {
