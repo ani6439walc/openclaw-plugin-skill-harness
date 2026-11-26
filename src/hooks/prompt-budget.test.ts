@@ -1424,6 +1424,191 @@ describe("native admission identity", () => {
     },
   );
 
+  it.each(["run-only", "ID-only"] as const)(
+    "admits SDK-verified callbacks to full pending buckets after lookup resolves while preserving a %s slot",
+    async (keyless) => {
+      const f = fixture();
+      const sdkKey = "agent:main:discord:direct:sdk-verified";
+      const lookup =
+        deferred<Awaited<ReturnType<typeof f.sessionLookup>>>(undefined);
+      const workingSet = deferred(["fixture"]);
+      f.sessionLookup.mockReturnValueOnce(lookup.promise);
+      f.getWorkingSetSkills.mockReturnValueOnce(workingSet.promise);
+      const admitted = {
+        ...event,
+        currentUserMessageId: `sdk-verified-${keyless}`,
+      };
+      const pending = f.handlers.onBeforePromptBuild(admitted, {
+        ...ctx,
+        sessionKey: undefined,
+      });
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+
+      const { runId, sessionId } = ctx;
+      lookup.resolve({ sessionKey: sdkKey, entry: { sessionId } });
+      await until(() => f.getWorkingSetSkills.mock.calls.length === 1);
+
+      const observe = (context: PluginHookAgentContext, reply: string) =>
+        f.handlers.onAgentEnd(
+          { success: true, messages: [{ role: "assistant", content: reply }] },
+          context,
+        );
+      const firstKey = "agent:main:direct:nonmatching-0";
+      const attemptBucket = await captureCallbackBucket(`key:${firstKey}`, () =>
+        observe({ runId, sessionKey: firstKey }, "nonmatching attempt"),
+      );
+      for (let index = 1; index < 7; index++) {
+        await observe(
+          { runId, sessionKey: `agent:main:direct:nonmatching-${index}` },
+          "nonmatching attempt",
+        );
+      }
+      await observe(
+        keyless === "ID-only" ? { runId, sessionId } : { runId },
+        "keyless attempt",
+      );
+      expect(attemptBucket.size).toBe(8);
+
+      const settlementBucket = await captureCallbackBucket(firstKey, () =>
+        settleRun(f.handlers, { runId, sessionKey: firstKey }, "nonmatching"),
+      );
+      for (let index = 1; index < 8; index++) {
+        await settleRun(
+          f.handlers,
+          { runId, sessionKey: `agent:main:direct:nonmatching-${index}` },
+          "nonmatching",
+        );
+      }
+      expect(settlementBucket.size).toBe(8);
+
+      await observe(
+        { runId, sessionId, sessionKey: sdkKey },
+        "sdk verified reply",
+      );
+      await settleRun(
+        f.handlers,
+        { runId, sessionId, sessionKey: sdkKey },
+        "sdk terminal fallback",
+      );
+      const conflictingKey = "agent:main:direct:conflicting";
+      await observe(
+        { runId, sessionId, sessionKey: conflictingKey },
+        "conflicting attempt",
+      );
+      await settleRun(
+        f.handlers,
+        { runId, sessionId, sessionKey: conflictingKey },
+        "conflicting settlement",
+      );
+
+      expect(attemptBucket.size).toBe(8);
+      expect(attemptBucket.has("")).toBe(true);
+      expect(attemptBucket.has(`key:${sdkKey}`)).toBe(true);
+      expect(attemptBucket.has(`key:${conflictingKey}`)).toBe(false);
+      expect(settlementBucket.size).toBe(8);
+      expect(settlementBucket.has(sdkKey)).toBe(true);
+      expect(settlementBucket.has(conflictingKey)).toBe(false);
+      expect(f.tracker.getCurrentState(sessionId)).toBeUndefined();
+
+      workingSet.resolve(["fixture"]);
+      await pending;
+
+      expect(f.tracker.getCurrentState(sessionId)).toMatchObject({
+        result: "sdk verified reply",
+        timestamps: { end: expect.any(String) },
+      });
+    },
+  );
+
+  it("keeps a newer host key authoritative over a resolved SDK key in full pending buckets", async () => {
+    const f = fixture();
+    const sdkKey = "agent:main:discord:direct:sdk-superseded";
+    const hostKey = "agent:main:discord:direct:host-authoritative";
+    const lookup =
+      deferred<Awaited<ReturnType<typeof f.sessionLookup>>>(undefined);
+    const workingSet = deferred(["fixture"]);
+    f.sessionLookup.mockReturnValueOnce(lookup.promise);
+    f.getWorkingSetSkills.mockReturnValueOnce(workingSet.promise);
+    const admitted = { ...event, currentUserMessageId: "host-over-sdk" };
+    const first = f.handlers.onBeforePromptBuild(admitted, {
+      ...ctx,
+      sessionKey: undefined,
+    });
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+
+    const { runId, sessionId } = ctx;
+    lookup.resolve({ sessionKey: sdkKey, entry: { sessionId } });
+    await until(() => f.getWorkingSetSkills.mock.calls.length === 1);
+
+    const secondWorkingSet = deferred(["fixture"]);
+    f.getWorkingSetSkills.mockReturnValueOnce(secondWorkingSet.promise);
+    const second = f.handlers.onBeforePromptBuild(admitted, {
+      ...ctx,
+      sessionKey: hostKey,
+    });
+
+    const observe = (context: PluginHookAgentContext, reply: string) =>
+      f.handlers.onAgentEnd(
+        { success: true, messages: [{ role: "assistant", content: reply }] },
+        context,
+      );
+    const firstKey = "agent:main:direct:nonmatching-0";
+    const attemptBucket = await captureCallbackBucket(`key:${firstKey}`, () =>
+      observe({ runId, sessionKey: firstKey }, "nonmatching attempt"),
+    );
+    for (let index = 1; index < 8; index++) {
+      await observe(
+        { runId, sessionKey: `agent:main:direct:nonmatching-${index}` },
+        "nonmatching attempt",
+      );
+    }
+    const settlementBucket = await captureCallbackBucket(firstKey, () =>
+      settleRun(f.handlers, { runId, sessionKey: firstKey }, "nonmatching"),
+    );
+    for (let index = 1; index < 8; index++) {
+      await settleRun(
+        f.handlers,
+        { runId, sessionKey: `agent:main:direct:nonmatching-${index}` },
+        "nonmatching",
+      );
+    }
+
+    await observe(
+      { runId, sessionId, sessionKey: hostKey },
+      "host authoritative reply",
+    );
+    await settleRun(
+      f.handlers,
+      { runId, sessionId, sessionKey: hostKey },
+      "host terminal fallback",
+    );
+    await observe(
+      { runId, sessionId, sessionKey: sdkKey },
+      "stale sdk attempt",
+    );
+    await settleRun(
+      f.handlers,
+      { runId, sessionId, sessionKey: sdkKey },
+      "stale sdk settlement",
+    );
+
+    expect(attemptBucket.size).toBe(8);
+    expect(attemptBucket.has(`key:${hostKey}`)).toBe(true);
+    expect(attemptBucket.has(`key:${sdkKey}`)).toBe(false);
+    expect(settlementBucket.size).toBe(8);
+    expect(settlementBucket.has(hostKey)).toBe(true);
+    expect(settlementBucket.has(sdkKey)).toBe(false);
+
+    workingSet.resolve(["fixture"]);
+    secondWorkingSet.resolve(["fixture"]);
+    await Promise.all([first, second]);
+
+    expect(f.tracker.getCurrentState(sessionId)).toMatchObject({
+      result: "host authoritative reply",
+      timestamps: { end: expect.any(String) },
+    });
+  });
+
   it("admits a verified settlement to a full staged bucket", async () => {
     const { f, admitted, retained, replayCtx, match } =
       await retainedReplayFixture();

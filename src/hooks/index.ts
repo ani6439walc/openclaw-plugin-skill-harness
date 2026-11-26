@@ -147,26 +147,37 @@ interface PendingNativeRun {
 
 const maxPendingCallbacksPerRun = 8;
 
-function getPendingHostSessionKey(
+function getPendingEffectiveSessionKey(
   pending: PendingNativeRun | undefined,
 ): string | undefined {
   if (!pending) return;
   const request = pending.request;
+  const requestKey = normalizeTurnAssociationKey(request?.resolvedSessionKey);
+  const hostKey = pending.hostSessionKey;
   if (
-    request?.sessionKeyPriority === SESSION_KEY_PRIORITY.host &&
-    request.resolvedSessionKey &&
-    (request.sessionKeySeq ?? 0) > pending.hostSessionKeySeq
+    request &&
+    requestKey &&
+    (request.sessionKeyPriority ?? SESSION_KEY_PRIORITY.none) >
+      SESSION_KEY_PRIORITY.none &&
+    (!hostKey ||
+      canUpdateSessionKey(
+        {
+          sessionKeyPriority: SESSION_KEY_PRIORITY.host,
+          sessionKeySeq: pending.hostSessionKeySeq,
+        },
+        request,
+      ))
   )
-    return request.resolvedSessionKey;
-  return pending.hostSessionKey;
+    return requestKey;
+  return hostKey;
 }
 
 function evictUnverifiedKey<T>(
   callbacks: Map<string, T>,
-  hostSlot: string | undefined,
+  verifiedSlot: string | undefined,
 ): boolean {
   for (const slot of callbacks.keys()) {
-    if (slot && slot !== hostSlot) return callbacks.delete(slot);
+    if (slot && slot !== verifiedSlot) return callbacks.delete(slot);
   }
   return false;
 }
@@ -2345,14 +2356,17 @@ export function createHookHandlers(deps: HookDeps) {
       )
         return;
       if (!previous && attempts.size >= maxPendingCallbacksPerRun) {
-        const hostKey = getPendingHostSessionKey(pending);
-        const verifiedHostKey = Boolean(sessionKey && sessionKey === hostKey);
+        const effectiveKey = getPendingEffectiveSessionKey(pending);
+        const verifiedKey = Boolean(sessionKey && sessionKey === effectiveKey);
         const verifiedIdOnly = Boolean(
           !sessionKey && sessionId && sessionId === pending.sessionId,
         );
         if (
-          (!verifiedHostKey && !verifiedIdOnly) ||
-          !evictUnverifiedKey(attempts, hostKey ? `key:${hostKey}` : undefined)
+          (!verifiedKey && !verifiedIdOnly) ||
+          !evictUnverifiedKey(
+            attempts,
+            effectiveKey ? `key:${effectiveKey}` : undefined,
+          )
         )
           return;
       }
@@ -2450,9 +2464,9 @@ export function createHookHandlers(deps: HookDeps) {
           !settlements.has(slot) &&
           settlements.size >= maxPendingCallbacksPerRun
         ) {
-          const hostKey = getPendingHostSessionKey(pending);
-          const verifiedHostKey = Boolean(
-            eventSessionKey && eventSessionKey === hostKey,
+          const effectiveKey = getPendingEffectiveSessionKey(pending);
+          const verifiedKey = Boolean(
+            eventSessionKey && eventSessionKey === effectiveKey,
           );
           const verifiedIdOnly = Boolean(
             !eventSessionKey &&
@@ -2460,8 +2474,8 @@ export function createHookHandlers(deps: HookDeps) {
             eventSessionId === pending.sessionId,
           );
           if (
-            (!verifiedHostKey && !verifiedIdOnly) ||
-            !evictUnverifiedKey(settlements, hostKey)
+            (!verifiedKey && !verifiedIdOnly) ||
+            !evictUnverifiedKey(settlements, effectiveKey)
           )
             return;
         }
