@@ -267,6 +267,10 @@ export function createHookHandlers(deps: HookDeps) {
     });
 
   reviewScheduler.setRunner(async (candidate, abortSignal) => {
+    const getNeighborOffset = reviewLogWriter.inspectionOffsetsForEvent(
+      candidate.snapshot.eventId,
+    );
+    if (!getNeighborOffset) return;
     let relationContext: RelationReviewContext | undefined;
     let relationPreparation: RelationPreparationSummary = {
       status: "skipped",
@@ -301,8 +305,7 @@ export function createHookHandlers(deps: HookDeps) {
               usageStats: {},
               cacheTtlMs: 0,
             }),
-          getNeighborOffset: (key) =>
-            reviewLogWriter.relationInspectionOffset?.(key) ?? 0,
+          getNeighborOffset,
           onPreparation: (summary) => {
             relationPreparation = summary;
           },
@@ -1798,16 +1801,11 @@ export function createHookHandlers(deps: HookDeps) {
       }
     }
     observePhase?.("stats");
-    const recorded = skillInventory
-      ? statsAggregator.record(sessionId, state, undefined, {
-          skillInventory,
-        })
-      : statsAggregator.record(sessionId, state);
-    if (!recorded) return;
-    return {
-      agentId,
-      skillInventoryObserved: skillInventory !== undefined,
-    };
+    if (skillInventory) {
+      statsAggregator.record(sessionId, state, undefined, { skillInventory });
+    } else {
+      statsAggregator.record(sessionId, state);
+    }
   }
 
   async function buildReviewSnapshot(
@@ -1895,8 +1893,7 @@ export function createHookHandlers(deps: HookDeps) {
     observePhase?: AgentEndPhaseObserver,
   ): Promise<void> {
     if (!association) return;
-    const agentEndStats = await recordAgentEndStats(association, observePhase);
-    if (!agentEndStats) return;
+    await recordAgentEndStats(association, observePhase);
 
     observePhase?.("review-preparation");
     const resolvedConfig = config();
@@ -2149,7 +2146,11 @@ export function createHookHandlers(deps: HookDeps) {
         pendingToolCalls.delete(toolCallId);
         recordedToolCalls.add(toolCallId);
       }
-      await finalizeTrackedTurn(association, ctx);
+      if (finalized === "applied") {
+        await finalizeTrackedTurn(association, ctx);
+      } else {
+        await recordAgentEndStats(association);
+      }
     }
   }
 

@@ -19,8 +19,12 @@ import {
   SKILL_HARNESS_INTENT_CONTEXT,
   SKILL_HARNESS_SYSTEM_CONTEXT as BASE_SKILL_HARNESS_SYSTEM_CONTEXT,
 } from "./system-context.js";
-import { defaultTracker, type SessionState } from "../session/index.js";
-import { defaultStatsAggregator } from "../stats/index.js";
+import {
+  defaultTracker,
+  SessionTracker,
+  type SessionState,
+} from "../session/index.js";
+import { defaultStatsAggregator, StatsAggregator } from "../stats/index.js";
 import { resolvePackageRoot } from "../file-utils.js";
 
 const defaultCatalog = {
@@ -1294,6 +1298,7 @@ description: Navigate Tokyo.
         config: () => resolveConfig({ review: { enabled: true } }),
         skillInventoryResolver: resolver,
         reviewLogWriter: {
+          inspectionOffsetsForEvent: () => () => 0,
           completedSkillEpochKeys: () => new Set<string>(),
           record: vi.fn(),
         },
@@ -1515,7 +1520,10 @@ description: Navigate Tokyo.
         reviewScheduler: scheduler,
         loadReviewSubagent,
         skillInventoryResolver: vi.fn().mockResolvedValue([]),
-        reviewLogWriter: { record: vi.fn() },
+        reviewLogWriter: {
+          inspectionOffsetsForEvent: () => () => 0,
+          record: vi.fn(),
+        },
       },
     });
     const finishing = handlers.onAgentEnd(
@@ -1556,6 +1564,105 @@ description: Navigate Tokyo.
       expect(module.runReviewSubagent).not.toHaveBeenCalled();
     }
   });
+
+  it.each([1, 2])(
+    "evaluates a manual skill load for Review with dynamic routing disabled (threshold %i)",
+    async (toolCalls) => {
+      const root = fs.mkdtempSync(
+        path.join(os.tmpdir(), "manual-skill-review-"),
+      );
+      const tracker = SessionTracker.create(root);
+      const statsAggregator = StatsAggregator.create(root);
+      const search = vi.fn();
+      const routingSelector = vi.fn();
+      const reviewScheduler = createMockReviewScheduler();
+      const handlers = createHandlers(
+        {
+          config: {},
+          runtime: {
+            state: { resolveStateDir: () => root },
+            agent: { resolveAgentWorkspaceDir: () => root },
+          },
+        },
+        {
+          config: () =>
+            resolveConfig({
+              routing: { skills: { maxInjectedSkills: 0 } },
+              review: {
+                enabled: true,
+                model: "fixture/review",
+                triggers: { capabilityFit: { toolCalls } },
+              },
+            }),
+          dataRoot: root,
+          tracker,
+          statsAggregator,
+          qmdSkillIndex: { search },
+          routingSelector,
+          reviewScheduler,
+        },
+      );
+      const ctx = {
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        sessionId: "manual-session",
+        runId: "manual-run",
+        trigger: "user" as const,
+        messageProvider: "webchat",
+      };
+      try {
+        await handlers.onBeforePromptBuild(
+          { prompt: "Run the manual workflow", messages: [] },
+          ctx,
+        );
+        expect(tracker.getCurrentState(ctx.sessionId)?.turnKey).toBe(ctx.runId);
+        await handlers.onAfterToolCall(
+          {
+            toolName: "skill_view",
+            params: { name: "manual" },
+            result: JSON.stringify({
+              success: true,
+              name: "manual",
+              content: "Manual instructions",
+              path: path.join(root, "skills/manual/SKILL.md"),
+            }),
+          },
+          ctx,
+        );
+        await handlers.onAgentEnd({ messages: [], success: true }, ctx);
+        await handlers.onMessageSending({ content: "done" }, ctx);
+
+        expect(search).not.toHaveBeenCalled();
+        expect(routingSelector).not.toHaveBeenCalled();
+        const state = tracker.getCurrentState(ctx.sessionId)!;
+        expect(state.skillsUsed?.map((skill) => skill.name)).toEqual([
+          "manual",
+        ]);
+        expect(state.matchedSkills).toBeUndefined();
+        expect(statsAggregator.isRecordable(ctx.sessionId, state)).toBe(false);
+        expect(statsAggregator.listProcessedEventIds().size).toBe(0);
+        if (toolCalls === 1) {
+          expect(reviewScheduler.schedule).toHaveBeenCalledOnce();
+          expect(reviewScheduler.schedule.mock.calls[0][0]).toMatchObject({
+            triggers: ["capability-fit"],
+            snapshot: {
+              current: {
+                capabilityFit: {
+                  source: "tool-call-threshold",
+                  observedSkillNames: ["manual"],
+                },
+              },
+            },
+          });
+        } else {
+          expect(reviewScheduler.schedule).not.toHaveBeenCalled();
+        }
+      } finally {
+        await handlers.disposePromptWork();
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("enqueues enabled multi-trigger review without awaiting it", async () => {
     const snapshot = {
@@ -1610,6 +1717,7 @@ description: Navigate Tokyo.
       noFindingReasonCounts: { "wrong-trigger": 1 },
     });
     const reviewLogWriter = {
+      inspectionOffsetsForEvent: () => () => 0,
       completedSkillEpochKeys: vi.fn().mockReturnValue(undefined),
       record: vi.fn(),
     };

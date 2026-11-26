@@ -7,6 +7,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { DatabaseSync } from "node:sqlite";
+import {
+  PROCESSED_EVENT_OUTCOMES,
+  ReviewLogSchema,
+} from "../dist/src/review/log.js";
 
 const SCRIPT_PATH = fs.realpathSync(fileURLToPath(import.meta.url));
 const RETENTION_DAYS = 14;
@@ -22,14 +26,9 @@ const LATENCY_BUCKETS = [
   "5000+",
 ];
 const ROUTE_REASONS = ["qmd-keyword", "qmd-hybrid", "llm-classifier"];
-const OUTCOMES = [
-  "applied",
-  "nofinding",
-  "schema-rejected",
-  "parse-failed",
-  "subagent-error",
-  "validation-failed",
-];
+const COMPLETED_OUTCOMES = PROCESSED_EVENT_OUTCOMES.filter(
+  (value) => value !== "skipped",
+);
 const isObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const objectOrEmpty = (value) => (isObject(value) ? value : {});
@@ -148,12 +147,11 @@ function requireObject(value, field, target) {
   return value[field];
 }
 function loadReviewLog(target) {
-  const value = loadJson(target);
-  if (value.schemaVersion !== 9)
-    throw new Error(`${target} must be a current schema-v9 review log`);
-  for (const field of ["processedEvents", "reviewedSkillEpochs"])
-    requireObject(value, field, target);
-  return value;
+  const parsed = ReviewLogSchema.safeParse(loadJson(target));
+  // Zod issues can contain private event IDs, paths, and rejected values.
+  if (!parsed.success)
+    throw new Error("review.json must be a valid schema-v9 review log");
+  return parsed.data;
 }
 function loadStats(target) {
   const value = loadJson(target);
@@ -387,79 +385,32 @@ function reviewChangeSummary(events) {
     preparation = counter(),
     skipReasons = counter(),
     existingAssessments = counter(),
-    discoveryAssessments = counter(),
-    committedOperations = counter();
+    discoveryAssessments = counter();
   let searchCalls = 0,
-    eventsWithoutPreparation = 0,
-    invalidRecords = 0;
-  for (const event of values(events)) {
-    if (!isObject(event)) {
-      invalidRecords++;
-      continue;
-    }
-    const outcome = event.outcome;
+    eventsWithoutPreparation = 0;
+  for (const event of Object.values(events)) {
     const prep = event.relationPreparation;
-    if (isObject(prep) && ["ready", "skipped"].includes(prep.status)) {
+    if (prep) {
       increment(preparation, prep.status);
-      if (
-        [
-          "no-seeds",
-          "registry-unavailable",
-          "no-eligible-seeds",
-          "preparation-failed",
-          "no-data-root",
-        ].includes(prep.reason)
-      )
-        increment(skipReasons, prep.reason);
+      if (prep.reason) increment(skipReasons, prep.reason);
     } else eventsWithoutPreparation++;
-    if (outcome === "skipped") continue;
-    increment(outcomes, typeof outcome === "string" ? outcome : "<non-string>");
-    const assessment = objectOrEmpty(event.relationReview);
-    for (const [field, counts] of [
-      ["existing", existingAssessments],
-      ["discovery", discoveryAssessments],
-    ])
-      if (
-        ["changes-proposed", "no-change", "not-applicable"].includes(
-          assessment[field],
-        )
-      )
-        increment(counts, assessment[field]);
-    if (
-      Number.isInteger(event.relationSearchCount) &&
-      event.relationSearchCount >= 0 &&
-      event.relationSearchCount <= 4
-    )
-      searchCalls += event.relationSearchCount;
-    for (const trigger of Array.isArray(event.triggers) ? event.triggers : [])
-      if (typeof trigger === "string") increment(triggerEvents, trigger);
-    const changes =
-      outcome === "applied" && Array.isArray(event.changes)
-        ? event.changes
-        : [];
-    increment(changesPerEvent, String(changes.length));
-    for (const change of changes) {
-      if (!isObject(change)) {
-        invalidRecords++;
-        continue;
-      }
-      if (typeof change.trigger === "string")
-        increment(changesByTrigger, change.trigger);
-      if (typeof change.operation === "string") {
-        increment(operations, change.operation);
-        if (
-          change.targetKind === "skill-relation" &&
-          ["create", "update", "delete"].includes(change.operation)
-        )
-          increment(committedOperations, change.operation);
-      }
+    if (event.outcome === "skipped") continue;
+    increment(outcomes, event.outcome);
+    if (event.relationReview) {
+      increment(existingAssessments, event.relationReview.existing);
+      increment(discoveryAssessments, event.relationReview.discovery);
     }
-    for (const [field, counts] of [
-      ["noFindingReasonCounts", noFindingReasons],
-      ["schemaRejectionReasonCounts", schemaRejectionReasons],
-    ])
-      for (const [reason, count] of entries(event[field]))
-        if (Number.isInteger(count)) increment(counts, reason, count);
+    searchCalls += event.relationSearchCount ?? 0;
+    for (const trigger of event.triggers) increment(triggerEvents, trigger);
+    increment(changesPerEvent, String(event.changeCount));
+    for (const change of event.changes ?? []) {
+      increment(changesByTrigger, change.trigger);
+      increment(operations, change.operation);
+    }
+    for (const [reason, count] of entries(event.noFindingReasonCounts))
+      increment(noFindingReasons, reason, count);
+    for (const [reason, count] of entries(event.schemaRejectionReasonCounts))
+      increment(schemaRejectionReasons, reason, count);
   }
   const eventCount = sum([...outcomes.values()]),
     total = sum([...changesByTrigger.values()]),
@@ -467,7 +418,7 @@ function reviewChangeSummary(events) {
   return {
     eventCount,
     skippedPreparations: preparation.get("skipped") ?? 0,
-    invalidRecords,
+    invalidRecords: 0,
     outcomes: counterDict(outcomes),
     changes: {
       appliedEvents,
@@ -488,7 +439,7 @@ function reviewChangeSummary(events) {
       existingAssessments: counterDict(existingAssessments),
       discoveryAssessments: counterDict(discoveryAssessments),
       searchCalls,
-      committedOperations: counterDict(committedOperations),
+      committedOperations: counterDict(operations),
       eventsWithoutPreparation,
     },
   };
@@ -844,7 +795,7 @@ function reviewAnalysis(review, start, end) {
     ...result,
     status: "observed-completed-events",
     outcomeRates: Object.fromEntries(
-      OUTCOMES.map((outcome) => [
+      COMPLETED_OUTCOMES.map((outcome) => [
         outcome,
         ratio(result.outcomes[outcome] ?? 0, result.eventCount),
       ]),

@@ -234,6 +234,14 @@ function sanitizeToolParamsForReview(
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
+function hasReviewEvidence(state: SessionState): boolean {
+  return (
+    state.matchedSkills !== undefined ||
+    Boolean(state.intent?.result) ||
+    Boolean(state.skillsUsed?.length)
+  );
+}
+
 function createReviewState(
   state: SessionState,
   options?: {
@@ -913,21 +921,12 @@ export class SessionTracker {
   getReviewSnapshot(sessionId: string): ReviewSnapshot | undefined {
     const session = this.sessionData.get(sessionId);
     const start = session?.current.timestamps?.start;
-    if (
-      !session ||
-      !start ||
-      (session.current.matchedSkills === undefined &&
-        !session.current.intent?.result)
-    ) {
-      return;
-    }
+    if (!session || !start || !hasReviewEvidence(session.current)) return;
 
     const completedStates = [
       ...(session.history ?? []),
       session.current,
-    ].filter(
-      (state) => state.matchedSkills !== undefined || state.intent?.result,
-    );
+    ].filter(hasReviewEvidence);
     return {
       sessionId,
       sessionKey: session.sessionKey,
@@ -956,18 +955,16 @@ export class SessionTracker {
     if (matches.length !== 1) return;
     const { state: target, index: targetIndex } = matches[0];
     const eventId = resolveTurnEventId(sessionId, target);
-    if (
-      !target.timestamps?.end ||
-      !eventId ||
-      (target.matchedSkills === undefined && !target.intent?.result)
-    ) {
+    if (!target.timestamps?.end || !eventId || !hasReviewEvidence(target))
       return;
-    }
     const throughTarget = ordered
       .slice(0, targetIndex + 1)
       .filter(
         (state) =>
-          state.input || state.matchedSkills?.length || state.intent?.result,
+          state.input ||
+          state.matchedSkills?.length ||
+          state.intent?.result ||
+          state.skillsUsed?.length,
       );
     return {
       sessionId,

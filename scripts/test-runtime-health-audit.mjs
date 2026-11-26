@@ -13,6 +13,28 @@ import { buildReport, isoTimestamp, sha256 } from "./runtime-health-audit.mjs";
 const SCRIPT = fileURLToPath(
   new URL("./runtime-health-audit.mjs", import.meta.url),
 );
+const REVIEW_SOURCE = {
+  sessionId: "session-1",
+  agentId: "main",
+  turnStart: "2026-08-01T00:00:00.000Z",
+};
+const NO_FINDING_EVENT = {
+  processedAt: REVIEW_SOURCE.turnStart,
+  source: REVIEW_SOURCE,
+  triggers: ["capability-fit"],
+  changeCount: 0,
+  outcome: "nofinding",
+};
+const SKIPPED_PREPARATION = {
+  status: "skipped",
+  reason: "no-seeds",
+  requestedSeeds: 0,
+  capturedSeeds: 0,
+  capturedExtras: 0,
+  existingNeighborAttempts: 0,
+  discoveryAttempts: 0,
+  skippedCaptureCount: 0,
+};
 const FIXTURE = {
   "stats.json": {
     schemaVersion: 7,
@@ -213,23 +235,40 @@ const FIXTURE = {
     updatedAt: "2026-08-01T00:00:00.000Z",
     processedEvents: {
       "event-1": {
-        processedAt: "2026-08-01T00:00:00.000Z",
-        triggers: ["capability-fit"],
+        ...NO_FINDING_EVENT,
         changeCount: 1,
         outcome: "applied",
+        changedRelationCount: 1,
+        relationOutcome: "applied",
+        relationBatchId: "batch-1",
         changes: [
           {
             trigger: "capability-fit",
             targetKind: "skill-relation",
             operation: "update",
+            fromSkillId: "first",
+            toSkillId: "second",
+            relationType: "related",
+            reason: "The procedures use the same inputs.",
+            relationEvidence: ["first", "second"].map((skillId) => ({
+              skillId,
+              filePath: "SKILL.md",
+              startLine: 1,
+              endLine: 1,
+              quote: "PRIVATE_EVIDENCE",
+            })),
+            dedupeKey: "update-example",
+            summary: "PRIVATE_REVIEW",
+            evidence: ["PRIVATE_EVIDENCE"],
+            correctionGoal: "Update the relation.",
+            suggestedChange: "PRIVATE_SUGGESTION",
           },
         ],
       },
       "event-2": {
+        ...NO_FINDING_EVENT,
         processedAt: "2026-08-01T00:01:00.000Z",
         triggers: ["routing-uncertainty"],
-        changeCount: 0,
-        outcome: "nofinding",
         noFindingReasonCounts: {
           "already-covered": 1,
         },
@@ -626,14 +665,14 @@ test("review multi-trigger outcomes count committed changes only", () => {
       ].map((outcome) => [
         outcome,
         {
-          processedAt: "2026-08-01T00:00:00Z",
+          ...(outcome === "applied"
+            ? r.processedEvents["event-1"]
+            : NO_FINDING_EVENT),
           outcome,
           triggers: ["capability-fit", "routing-uncertainty"],
-          changes: [{ trigger: "capability-fit", operation: "create" }],
-          summary: "PRIVATE_REVIEW",
-          evidence: ["PRIVATE_EVIDENCE"],
-          schemaRejectionReasonCounts:
-            outcome === "schema-rejected" ? { "missing-target": 1 } : {},
+          ...(outcome === "schema-rejected"
+            ? { schemaRejectionReasonCounts: { "missing-target": 1 } }
+            : {}),
         },
       ]),
     );
@@ -649,12 +688,17 @@ test("relation inspection separates reported proposals from committed operations
   update("review.json", (r) => {
     r.processedEvents = {
       proposed: {
+        ...NO_FINDING_EVENT,
         processedAt: "2026-08-01T00:00:00Z",
         outcome: "validation-failed",
         relationPreparation: {
           status: "ready",
+          requestedSeeds: 2,
           capturedSeeds: 2,
           capturedExtras: 3,
+          existingNeighborAttempts: 2,
+          discoveryAttempts: 1,
+          skippedCaptureCount: 0,
         },
         relationReview: {
           existing: "no-change",
@@ -663,11 +707,15 @@ test("relation inspection separates reported proposals from committed operations
         relationSearchCount: 2,
       },
       skipped: {
+        ...NO_FINDING_EVENT,
         processedAt: "2026-08-01T00:01:00Z",
         outcome: "skipped",
-        relationPreparation: { status: "skipped", reason: "no-eligible-seeds" },
+        relationPreparation: {
+          ...SKIPPED_PREPARATION,
+          reason: "no-eligible-seeds",
+        },
       },
-      historical: { processedAt: "2026-08-01T00:02:00Z", outcome: "nofinding" },
+      historical: { ...NO_FINDING_EVENT, processedAt: "2026-08-01T00:02:00Z" },
     };
   });
   const r = report().runtime.review.processedEvents.relationInspection;
@@ -684,11 +732,12 @@ test("relation inspection separates reported proposals from committed operations
 test("a skipped preparation is counted separately from completed reviews", () => {
   update("review.json", (r) => {
     r.processedEvents = {
-      completed: { processedAt: "2026-08-01T00:00:00Z", outcome: "nofinding" },
+      completed: NO_FINDING_EVENT,
       skipped: {
+        ...NO_FINDING_EVENT,
         processedAt: "2026-08-01T01:00:00Z",
         outcome: "skipped",
-        relationPreparation: { status: "skipped", reason: "no-seeds" },
+        relationPreparation: SKIPPED_PREPARATION,
       },
     };
   });
@@ -700,7 +749,40 @@ test("a skipped preparation is counted separately from completed reviews", () =>
     denominator: 1,
     rate: 1,
   });
-  assert.equal(review.lastCompletedAt, "2026-08-01T00:00:00Z");
+  assert.equal(review.lastCompletedAt, NO_FINDING_EVENT.processedAt);
+  update("review.json", (r) => delete r.processedEvents.completed);
+  const skipOnly = report().analysis.windows.recent.review;
+  assert.equal(skipOnly.skippedPreparations, 1);
+  assert.equal(skipOnly.eventCount, 0);
+  assert.equal(skipOnly.outcomeRates.nofinding.rate, null);
+  assert.equal(skipOnly.lastCompletedAt, null);
+});
+test("rejects invalid v9 receipts even outside the reporting window without exposing private data", () => {
+  const applied = FIXTURE["review.json"].processedEvents["event-1"];
+  const malformed = [
+    { ...applied, relationBatchId: undefined },
+    { ...applied, changedRelationCount: 7 },
+    { ...NO_FINDING_EVENT, relationPreparation: SKIPPED_PREPARATION },
+    { ...NO_FINDING_EVENT, outcome: "skipped" },
+    { ...NO_FINDING_EVENT, triggers: ["experience-health-check"] },
+    { ...NO_FINDING_EVENT, PRIVATE_UNKNOWN_FIELD: "PRIVATE_VALUE" },
+  ];
+  for (const event of malformed) {
+    update("review.json", (r) => {
+      r.processedEvents.PRIVATE_EVENT_ID = {
+        ...event,
+        processedAt: "2026-01-01T00:00:00.000Z",
+      };
+    });
+    assert.throws(() => report(), {
+      message: "review.json must be a valid schema-v9 review log",
+    });
+  }
+  const result = cli(["--stdout"]);
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /schema-v9/);
+  assert.doesNotMatch(result.stderr, /PRIVATE/);
 });
 test("multiple skill indexes aggregate failures without exposing names", () => {
   for (const name of ["secret-one", "secret-two", "missing", "corrupt"])

@@ -47,17 +47,23 @@ export class IntentReviewLogWriter {
     }
   }
 
-  relationInspectionOffset(key: string): number {
-    const logPath = reviewLogPath(this.dataRoot);
-    if (!fileExists(logPath)) return 0;
+  /** A missing log starts a new inspection. Existing history must admit this event. */
+  inspectionOffsetsForEvent(
+    eventId: string,
+  ): ((key: string) => number) | undefined {
     try {
-      return (
-        parseReviewLog(readJsonFile<unknown>(logPath))
-          .relationInspectionCursors?.[key]?.offset ?? 0
+      const log = parseReviewLog(
+        readJsonFile<unknown>(reviewLogPath(this.dataRoot)),
       );
-    } catch {
-      // Reading a cursor cannot authorize replacement of an unreadable history.
-      return 0;
+      if (Object.hasOwn(log.processedEvents, eventId)) return;
+      return (key) => log.relationInspectionCursors?.[key]?.offset ?? 0;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return () => 0;
+      const diagnostic = safeErrorClassification(error);
+      logger.warn(
+        `skipping relation review: incompatible or unreadable log reason=${diagnostic.reason}`,
+      );
+      return;
     }
   }
 

@@ -78,16 +78,18 @@ describe("IntentReviewLogWriter", () => {
       relationInspectionCursor: { key, nextOffset: 4 },
     };
     expect(await writer.record("inspection", source, [], options)).toBe(true);
-    expect(new IntentReviewLogWriter(root).relationInspectionOffset(key)).toBe(
-      4,
-    );
+    expect(
+      new IntentReviewLogWriter(root).inspectionOffsetsForEvent("unused")?.(
+        key,
+      ),
+    ).toBe(4);
     expect(
       await writer.record("inspection", source, [], {
         ...options,
         relationInspectionCursor: { key, nextOffset: 8 },
       }),
     ).toBe(false);
-    expect(writer.relationInspectionOffset(key)).toBe(4);
+    expect(writer.inspectionOffsetsForEvent("unused")?.(key)).toBe(4);
     const log = parseReviewLog(
       JSON.parse(fs.readFileSync(path.join(root, "review.json"), "utf8")),
     );
@@ -138,7 +140,7 @@ describe("IntentReviewLogWriter", () => {
     expect(Object.keys(log.relationInspectionCursors!)).toHaveLength(256);
     expect(log.relationInspectionCursors).not.toHaveProperty("0".repeat(64));
     expect(log.processedEvents).toHaveProperty("prior");
-    expect(writer.relationInspectionOffset(key)).toBe(4);
+    expect(writer.inspectionOffsetsForEvent("unused")?.(key)).toBe(4);
   });
 
   it.each(["create", "update", "delete"] as const)(
@@ -238,20 +240,33 @@ describe("IntentReviewLogWriter", () => {
     };
     fs.writeFileSync(file, JSON.stringify(log));
     expect(writer.completedSkillEpochKeys()).toEqual(new Set([key]));
+    const relationPreparation = {
+      status: "skipped" as const,
+      reason: "no-seeds" as const,
+      requestedSeeds: 0,
+      capturedSeeds: 0,
+      capturedExtras: 0,
+      existingNeighborAttempts: 0,
+      discoveryAttempts: 0,
+      skippedCaptureCount: 0,
+    };
+    expect(
+      await writer.record("missing-preparation", source, [], {
+        outcome: "skipped",
+      }),
+    ).toBe(false);
+    expect(
+      await writer.record("wrong-outcome", source, [], {
+        outcome: "nofinding",
+        relationPreparation,
+      }),
+    ).toBe(false);
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual(log);
     expect(
       await writer.record("skipped", source, [], {
         triggers: ["relation-health-check"],
-        outcome: "nofinding",
-        relationPreparation: {
-          status: "skipped",
-          reason: "no-seeds",
-          requestedSeeds: 0,
-          capturedSeeds: 0,
-          capturedExtras: 0,
-          existingNeighborAttempts: 0,
-          discoveryAttempts: 0,
-          skippedCaptureCount: 0,
-        },
+        outcome: "skipped",
+        relationPreparation,
       }),
     ).toBe(true);
     const saved = parseReviewLog(JSON.parse(fs.readFileSync(file, "utf8")));

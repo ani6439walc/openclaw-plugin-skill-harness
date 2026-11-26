@@ -149,13 +149,11 @@ export type HookDeps = {
     params: JevUnifiedRoutingParams,
   ) => Promise<RoutingLlmResult | undefined>;
   classifier?: (params: unknown) => Promise<RoutingLlmResult | undefined>;
-  reviewLogWriter?: Pick<IntentReviewLogWriter, "record"> &
-    Partial<
-      Pick<
-        IntentReviewLogWriter,
-        "completedSkillEpochKeys" | "relationInspectionOffset"
-      >
-    >;
+  reviewLogWriter?: Pick<
+    IntentReviewLogWriter,
+    "record" | "inspectionOffsetsForEvent"
+  > &
+    Partial<Pick<IntentReviewLogWriter, "completedSkillEpochKeys">>;
   getWorkingSetSkills?: (agentId: string) => string[] | Promise<string[]>;
 
   bundledSkillsDir?: string;

@@ -364,7 +364,9 @@ The full accepted schema is in [`openclaw.plugin.json`](openclaw.plugin.json). C
 
 ## Runtime health and troubleshooting
 
-Use the maintenance CLI for a private, report-only check of retrieval, injection, recorded skill use, Review outcomes, index health, retention, and disk growth. From a source checkout:
+Use the maintenance CLI for a private, report-only check of retrieval, injection, recorded skill use, Review outcomes, index health, retention, and disk growth.
+
+In a source checkout, run `pnpm install --frozen-lockfile` and `pnpm run build` first. Installed packages include the Review schema used by the audit.
 
 ```bash
 node scripts/runtime-health-audit.mjs --days 7 --output /tmp/skill-harness-runtime-health.json

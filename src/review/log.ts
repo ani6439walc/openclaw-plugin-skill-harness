@@ -303,6 +303,15 @@ const ProcessedEventRecordSchema = z
   .superRefine((record, ctx) => {
     const issue = (path: string, message: string) =>
       ctx.addIssue({ code: "custom", path: [path], message });
+    if (
+      (record.outcome === "skipped") !==
+      (record.relationPreparation?.status === "skipped")
+    ) {
+      issue(
+        "outcome",
+        "Skipped outcomes and skipped preparations must occur together",
+      );
+    }
     if (record.changeCount !== (record.changes?.length ?? 0)) {
       issue("changeCount", "Receipt change count must match applied findings");
     }

@@ -362,7 +362,7 @@ Use this workflow on explicit user request to inspect runtime health, skill disc
 
 ### Generate a private report
 
-From the package root:
+In a source checkout, run `pnpm install --frozen-lockfile` and `pnpm run build` first. Installed packages include the Review schema used by the audit.
 
 ```bash
 node scripts/runtime-health-audit.mjs \
