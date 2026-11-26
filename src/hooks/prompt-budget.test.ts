@@ -111,6 +111,22 @@ function settleRun(
   });
 }
 
+async function captureCallbackBucket(
+  slot: string,
+  record: () => Promise<void>,
+): Promise<Map<unknown, unknown>> {
+  const set = vi.spyOn(Map.prototype, "set");
+  try {
+    await record();
+    const write = set.mock.calls.findIndex(([key]) => key === slot);
+    const bucket = set.mock.contexts[write];
+    if (!(bucket instanceof Map)) throw new Error("Callback bucket not found");
+    return bucket;
+  } finally {
+    set.mockRestore();
+  }
+}
+
 function fixture(existingRoot?: string) {
   const root =
     existingRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), "prompt-budget-"));
@@ -1124,6 +1140,151 @@ describe("native admission identity", () => {
       expect(f.turnAssociations.resolve(replayCtx.runId)).toBeUndefined();
     },
   );
+
+  it.each([
+    { identity: "ID-only", settlementTiming: "during lookup", runOnly: true },
+    { identity: "ID-only", settlementTiming: "after lookup", runOnly: true },
+    { identity: "canonical", settlementTiming: "during lookup", runOnly: true },
+    { identity: "canonical", settlementTiming: "after lookup", runOnly: true },
+    { identity: "ID-only", settlementTiming: "during lookup", runOnly: false },
+    {
+      identity: "canonical",
+      settlementTiming: "during lookup",
+      runOnly: false,
+    },
+  ])(
+    "applies $identity attempt priority in a full staged bucket ($settlementTiming, run-only: $runOnly)",
+    async ({ identity, settlementTiming, runOnly }) => {
+      const { f, admitted, retained, newer, replayCtx, match } =
+        await retainedReplayFixture();
+      const lookup = deferred<typeof match | undefined>(undefined);
+      f.sessionLookup.mockReturnValueOnce(lookup.promise);
+      const pending = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+      await until(() => f.sessionLookup.mock.calls.length === 1);
+
+      const { runId } = replayCtx;
+      const observe = (reply: string, context: PluginHookAgentContext) =>
+        f.handlers.onAgentEnd(
+          { success: true, messages: [{ role: "assistant", content: reply }] },
+          context,
+        );
+      for (let index = 0; index < 7; index++) {
+        await observe("nonmatching reply", {
+          runId,
+          sessionKey: `agent:main:direct:nonmatching-${index}`,
+        });
+      }
+      const lastKey = "agent:main:direct:nonmatching-7";
+      const bucket = runOnly
+        ? await captureCallbackBucket("run-only", () =>
+            observe("run-only reply", { runId }),
+          )
+        : await captureCallbackBucket(`key:${lastKey}`, () =>
+            observe("nonmatching reply", { runId, sessionKey: lastKey }),
+          );
+      expect(bucket.size).toBe(8);
+
+      const reply =
+        identity === "ID-only" ? "verified id reply" : "canonical key reply";
+      await observe(
+        reply,
+        identity === "ID-only"
+          ? replayCtx
+          : { runId, sessionKey: match.sessionKey },
+      );
+      expect(bucket.size).toBe(8);
+
+      const settle = () =>
+        settleRun(
+          f.handlers,
+          { ...replayCtx, sessionKey: match.sessionKey },
+          "terminal reply",
+        );
+      if (settlementTiming === "during lookup") await settle();
+      expect(
+        f.tracker.getTurnState(ctx.sessionId, retained)?.timestamps?.end,
+      ).toBeUndefined();
+      lookup.resolve(match);
+      await pending;
+      if (settlementTiming === "after lookup") await settle();
+
+      expect(f.tracker.getTurnState(ctx.sessionId, retained)).toMatchObject({
+        result: identity === "canonical" && !runOnly ? "terminal reply" : reply,
+        timestamps: { end: expect.any(String) },
+      });
+      expect(bucket.has("run-only")).toBe(false);
+      expect(f.turnAssociations.resolve(runId)).toBeUndefined();
+      expect(f.tracker.getCurrentState(ctx.sessionId)).toEqual(newer);
+    },
+  );
+
+  it("admits a verified settlement to a full staged bucket", async () => {
+    const { f, admitted, retained, replayCtx, match } =
+      await retainedReplayFixture();
+    const lookup = deferred<typeof match | undefined>(undefined);
+    f.sessionLookup.mockReturnValueOnce(lookup.promise);
+    const pending = f.handlers.onBeforePromptBuild(admitted, replayCtx);
+    await until(() => f.sessionLookup.mock.calls.length === 1);
+
+    const { runId } = replayCtx;
+    for (let index = 0; index < 7; index++) {
+      await settleRun(f.handlers, {
+        runId,
+        sessionKey: `agent:main:direct:nonmatching-${index}`,
+      });
+    }
+    const lastKey = "agent:main:direct:nonmatching-7";
+    const bucket = await captureCallbackBucket(lastKey, () =>
+      settleRun(f.handlers, { runId, sessionKey: lastKey }),
+    );
+    expect(bucket.size).toBe(8);
+    await settleRun(f.handlers, replayCtx, "verified settlement reply");
+    expect(bucket.size).toBe(8);
+    expect(
+      f.tracker.getTurnState(ctx.sessionId, retained)?.timestamps?.end,
+    ).toBeUndefined();
+    lookup.resolve(match);
+    await pending;
+
+    expect(f.tracker.getTurnState(ctx.sessionId, retained)).toMatchObject({
+      result: "verified settlement reply",
+      timestamps: { end: expect.any(String) },
+    });
+  });
+
+  it("admits a verified attempt to a full observed bucket with run-only fallback", async () => {
+    const { f, admitted, retained, replayCtx, match } =
+      await retainedReplayFixture();
+    const canonical = { ...replayCtx, sessionKey: match.sessionKey };
+    await f.handlers.onBeforePromptBuild(admitted, canonical);
+
+    const observe = (reply: string, context: PluginHookAgentContext) =>
+      f.handlers.onAgentEnd(
+        { success: true, messages: [{ role: "assistant", content: reply }] },
+        context,
+      );
+    await observe("canonical key reply", canonical);
+    const bucket = await captureCallbackBucket("run-only", () =>
+      observe("run-only reply", { runId: replayCtx.runId }),
+    );
+    const canonicalAttempt = bucket.get(`key:${match.sessionKey}`);
+    expect(canonicalAttempt).toBeDefined();
+    // A stable binding has fewer than seven distinct compatible identity slots.
+    // Seed compatible entries to exercise fallback eviction after stale-key eviction has no candidates.
+    for (let index = 0; index < 6; index++)
+      bucket.set(`key:compatible-${index}`, canonicalAttempt);
+    expect(bucket.size).toBe(8);
+
+    await observe("verified id reply", replayCtx);
+    expect(bucket.size).toBe(8);
+    await settleRun(f.handlers, canonical);
+
+    expect(f.tracker.getTurnState(ctx.sessionId, retained)).toMatchObject({
+      result: "verified id reply",
+      timestamps: { end: expect.any(String) },
+    });
+    expect(bucket.has("run-only")).toBe(false);
+  });
 
   it.each(["during lookup", "after lookup"] as const)(
     "keeps the staged reply when the bound key matches the settlement (%s)",

@@ -144,16 +144,6 @@ interface PendingNativeRun {
 
 const maxPendingCallbacksPerRun = 8;
 
-function stagePendingCallback<T>(
-  callbacks: Map<string, T>,
-  sessionKey: string | undefined,
-  callback: T,
-): void {
-  const key = normalizeTurnAssociationKey(sessionKey) ?? "";
-  if (callbacks.has(key) || callbacks.size < maxPendingCallbacksPerRun)
-    callbacks.set(key, callback);
-}
-
 function matchPendingCallback<T>(
   callbacks: Map<string, T>,
   association: TurnAssociation,
@@ -2312,11 +2302,29 @@ export function createHookHandlers(deps: HookDeps) {
       await flushToolFallbacks(association);
     } else if (pending) {
       const slot = attemptSlotKey(attempt.ctx);
-      if (
-        pending.attempts.has(slot) ||
-        pending.attempts.size < maxPendingCallbacksPerRun
-      )
-        pending.attempts.set(slot, attempt);
+      const attempts = pending.attempts;
+      if (!attempts.has(slot) && attempts.size >= maxPendingCallbacksPerRun) {
+        if (slot !== "run-only") {
+          attempts.delete("run-only");
+          if (
+            attempts.size >= maxPendingCallbacksPerRun &&
+            sessionId &&
+            sessionId === pending.sessionId
+          ) {
+            for (const [candidateSlot, candidate] of attempts) {
+              if (
+                candidateSlot.startsWith("key:") &&
+                !normalizeTurnAssociationKey(candidate.ctx.sessionId)
+              ) {
+                attempts.delete(candidateSlot);
+                break;
+              }
+            }
+          }
+        }
+        if (attempts.size >= maxPendingCallbacksPerRun) return;
+      }
+      attempts.set(slot, attempt);
     }
   }
 
@@ -2324,7 +2332,8 @@ export function createHookHandlers(deps: HookDeps) {
     association: TurnAssociation,
     attempt: ObservedAttempt,
   ): void {
-    if (attemptIdentityTier(attempt, association) === 0) return;
+    const tier = attemptIdentityTier(attempt, association);
+    if (tier === 0) return;
     const key = attemptKey(association);
     const attempts =
       observedAttempts.get(key) ?? new Map<string, ObservedAttempt>();
@@ -2332,14 +2341,15 @@ export function createHookHandlers(deps: HookDeps) {
     const previous = attempts.get(slot);
     if (previous && previous.sequence >= attempt.sequence) return;
     if (!previous && attempts.size >= maxPendingCallbacksPerRun) {
-      // Provisional keys can fill the bucket. Make room without evicting any
-      // attempt compatible with the current binding.
+      // Evict incompatible provisional keys before displacing a run-only fallback.
       for (const [candidateSlot, candidate] of attempts) {
         if (attemptIdentityTier(candidate, association) === 0) {
           attempts.delete(candidateSlot);
           break;
         }
       }
+      if (attempts.size >= maxPendingCallbacksPerRun && tier === 2)
+        attempts.delete("run-only");
       if (attempts.size >= maxPendingCallbacksPerRun) return;
     }
     attempts.set(slot, attempt);
@@ -2401,7 +2411,23 @@ export function createHookHandlers(deps: HookDeps) {
             eventSessionId !== pending.sessionId)
         )
           return;
-        stagePendingCallback(pending.settlements, eventSessionKey, {
+        const slot = eventSessionKey ?? "";
+        const settlements = pending.settlements;
+        if (
+          !settlements.has(slot) &&
+          settlements.size >= maxPendingCallbacksPerRun
+        ) {
+          if (eventSessionId && eventSessionId === pending.sessionId) {
+            for (const [candidateSlot, candidate] of settlements) {
+              if (candidate.sessionId === undefined) {
+                settlements.delete(candidateSlot);
+                break;
+              }
+            }
+          }
+          if (settlements.size >= maxPendingCallbacksPerRun) return;
+        }
+        settlements.set(slot, {
           ...event,
           sessionId: eventSessionId,
           sessionKey: eventSessionKey,
