@@ -78,6 +78,24 @@ export interface PluginHookAgentEndEvent {
   readonly durationMs?: number;
 }
 
+type AgentEventSubscription = Parameters<
+  OpenClawPluginApi["agent"]["events"]["registerAgentEventSubscription"]
+>[0];
+export type AgentLifecycleEvent = Parameters<
+  AgentEventSubscription["handle"]
+>[0];
+
+export type AttemptContext = Pick<
+  PluginHookAgentContext,
+  | "agentId"
+  | "sessionId"
+  | "sessionKey"
+  | "runId"
+  | "messageProvider"
+  | "modelProviderId"
+  | "modelId"
+>;
+
 export interface PluginHookBeforeAgentFinalizeEvent {
   readonly runId?: string;
   readonly sessionId: string;
@@ -91,10 +109,6 @@ export interface PluginHookBeforeAgentFinalizeResult {
     readonly idempotencyKey?: string;
     readonly maxAttempts?: number;
   };
-}
-
-export interface PluginHookMessageSendingEvent {
-  readonly content: string;
 }
 
 export interface PluginHookSessionContext {

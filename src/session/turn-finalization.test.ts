@@ -381,7 +381,11 @@ describe("SessionTracker exact-turn finalization", () => {
     });
     expect(replay).toEqual({
       status: "reused",
-      identity: { turnKey: "retained", reused: true },
+      identity: {
+        turnKey: "retained",
+        reused: true,
+        sessionKey: "agent:main:direct:a",
+      },
     });
     expect(fs.readFileSync(file, "utf8")).toBe(before);
     if (replay.status !== "reused")

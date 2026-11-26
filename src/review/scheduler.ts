@@ -3,6 +3,7 @@ import { formatErrorDiagnostic } from "../error-diagnostics.js";
 import type { ResolvedSkillHarnessPluginConfig } from "../types.js";
 import type { ReviewSnapshot } from "./types.js";
 import type { PluginHookAgentContext } from "../hooks/types.js";
+import type { TurnAssociationRegistry } from "../hooks/turn-associations.js";
 import type { BackgroundRunner } from "../subagent-runtime.js";
 
 export const INTENT_REVIEW_DEFAULT_IDLE_MS = 30_000;
@@ -16,6 +17,27 @@ export interface ReviewCandidate {
   resolvedConfig: ResolvedSkillHarnessPluginConfig;
   modelRef: { provider: string; model: string };
   snapshot: ReviewSnapshot;
+}
+
+export function resolveReviewSessionKey(
+  candidate: ReviewCandidate,
+): string | undefined {
+  return (
+    candidate.sessionKey?.trim() ||
+    candidate.ctx.sessionKey?.trim() ||
+    candidate.snapshot.sessionKey?.trim() ||
+    undefined
+  );
+}
+
+export function isReviewSessionActive(
+  turnAssociations: TurnAssociationRegistry,
+  candidate: ReviewCandidate,
+): boolean {
+  return (
+    turnAssociations.hasActiveSession(resolveReviewSessionKey(candidate)) ||
+    turnAssociations.hasActiveSession(candidate.snapshot.sessionId)
+  );
 }
 
 export type ReviewRunner = (
@@ -104,11 +126,7 @@ export class IntentReviewScheduler {
       return false;
     }
 
-    const sessionKey =
-      candidate.sessionKey ??
-      candidate.ctx.sessionKey ??
-      candidate.snapshot.sessionKey ??
-      "";
+    const sessionKey = resolveReviewSessionKey(candidate) ?? "";
     const key = JSON.stringify([candidate.agentId, sessionKey]);
 
     const existing = this.pendingBySession.get(key);

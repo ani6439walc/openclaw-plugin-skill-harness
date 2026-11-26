@@ -186,7 +186,7 @@ function findNativeTurn(
   return {
     turnKey,
     reused: true,
-    ...(session.sessionKey?.trim() ? { sessionKey: session.sessionKey } : {}),
+    sessionKey: session.sessionKey?.trim() || undefined,
     ...(match.timestamps?.end ? { finalized: true as const } : {}),
   };
 }
@@ -318,17 +318,14 @@ function observedReplyToCurrentInput(
     session.current.timestamps?.end
   )
     return false;
-  const index = recent.findIndex(
-    (turn) => turn.role === "user" && turn.text.trim() === input,
-  );
-  const reply = recent[index + 1];
   return (
-    index !== -1 &&
-    reply?.role === "assistant" &&
-    Boolean(reply.text.trim()) &&
-    !recent
-      .slice(index + 1)
-      .some((turn) => turn.role === "user" && turn.text.trim() === input) &&
+    recent.filter(
+      (turn, index) =>
+        turn.role === "user" &&
+        turn.text.trim() === input &&
+        recent[index + 1]?.role === "assistant" &&
+        recent[index + 1].text.trim(),
+    ).length === 1 &&
     !session.history?.some((turn) => turn.input?.trim() === input)
   );
 }
@@ -710,13 +707,28 @@ export class SessionTracker {
       : { acquired: true, result: locked };
   }
 
-  /** A cached replay hint for prompt ownership; preparation rechecks disk under lock. */
+  /** A read-only replay hint for prompt ownership; preparation rechecks disk under lock. */
   getNativeTurnIdentity(
     sessionId: string,
     agentId: string,
     nativeAdmissionId: string,
   ): PromptTurnIdentity | undefined {
-    const session = this.sessionData.get(sessionId);
+    const filename = `${sessionId}.json`;
+    if (!sessionId || path.basename(filename) !== filename) return;
+    const filePath = sessionsPath(filename, this.pluginRoot);
+    let session = this.sessionData.get(sessionId);
+    if (!session && fileExists(filePath)) {
+      try {
+        const persisted = readJsonFile<unknown>(filePath);
+        if (
+          isCurrentSessionData(persisted) &&
+          persisted.sessionId === sessionId
+        )
+          session = persisted;
+      } catch (error) {
+        logger.warn(formatErrorDiagnostic("failed to read native turn", error));
+      }
+    }
     if (!session) return;
     const identity = findNativeTurn(
       session,
@@ -770,21 +782,30 @@ export class SessionTracker {
             }
             // Rebuild a lost run association without rotating a newer turn or
             // applying the replayed prompt's transcript to its session state.
-            if (
-              requestedRunId &&
-              requestedRunId !== current.turnKey &&
-              session.history?.some((turn) => turn.turnKey === requestedRunId)
-            ) {
+            const matchedTurn = requestedRunId
+              ? current.turnKey === requestedRunId
+                ? current
+                : session.history?.find(
+                    (turn) => turn.turnKey === requestedRunId,
+                  )
+              : undefined;
+            if (matchedTurn && requestedRunId) {
               return {
                 result: {
                   status: "reused" as const,
-                  identity: { turnKey: requestedRunId, reused: true },
+                  identity: {
+                    turnKey: requestedRunId,
+                    reused: true,
+                    sessionKey: session.sessionKey?.trim() || undefined,
+                    ...(matchedTurn.timestamps?.end
+                      ? { finalized: true as const }
+                      : {}),
+                  },
                 },
                 changed: false,
               };
             }
-            // A matching assistant text may be a tool-use preamble. It can
-            // distinguish an anonymous repeat, but only an exact hook closes a turn.
+            // Transcript replies distinguish repeats. Only an exact hook closes a turn.
             const observedReply = Boolean(
               params.recentTurns?.length &&
               observedReplyToCurrentInput(session, params.recentTurns),
@@ -798,10 +819,7 @@ export class SessionTracker {
               !current.timestamps?.end &&
               current.turnKey &&
               current.input?.trim() === params.input.trim();
-            if (
-              (requestedRunId && current.turnKey === requestedRunId) ||
-              reusableWithoutRunId
-            ) {
+            if (reusableWithoutRunId) {
               return {
                 result: {
                   status: "reused" as const,
@@ -824,8 +842,8 @@ export class SessionTracker {
               ];
             }
             const turnKey = requestedRunId || randomUUID();
-            if (params.sessionKey?.trim())
-              session.sessionKey = params.sessionKey;
+            const sessionKey = params.sessionKey?.trim();
+            if (sessionKey) session.sessionKey = sessionKey;
             session.agentId = params.agentId;
             session.current = {
               turnKey,

@@ -1,7 +1,7 @@
 import type { ResolvedRoutingConfig } from "../types.js";
 
 const PROMPT_OVERHEAD_MS = 1_500;
-// The public schema permits up to 60 seconds for each parallel search and Jev.
+// The public schema permits up to 60 seconds each for skill search and selection.
 export const MAX_PROMPT_HOOK_TIMEOUT_MS = 60_000 + 60_000 + PROMPT_OVERHEAD_MS;
 
 export function promptRoutingBudgetMs(routing: ResolvedRoutingConfig): number {

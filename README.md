@@ -139,7 +139,7 @@ Managed skill searches keep `rerank: false`; query expansion continues to use `q
 
 This release retires experience retrieval, injection, maintenance and the `skill_experience` tool. Existing experience documents and their QMD index can stay in place. The new runtime does not create, read, modify or remove `dataRoot/experiences/` or `dataRoot/qmd/experiences/`.
 
-1. Prepare the build and its matching configuration together. Remove the entire `routing.experiences` block and any `review.triggers.experienceHealthCheck` or `review.triggers.intentHealthCheck` settings. The strict schema rejects the old keys. To carry forward an intentional cadence, set `review.triggers.relationHealthCheck.everyTurns` and use `review.enabled` to control background runs. Remove `skill_experience` from tool allowlists and prompts.
+1. Prepare the build and its matching configuration together. Remove the entire `routing.experiences` block and the retired `review.triggers.experienceHealthCheck`, `review.triggers.intentHealthCheck`, `review.triggers.routingUncertainty`, `review.triggers.capabilityFit`, and `review.triggers.relationHealthCheck.enabled` settings. The strict schema rejects the old keys. To carry forward an intentional cadence, set `review.triggers.relationHealthCheck.everyTurns` and use `review.enabled` to control background runs. Remove `skill_experience` from tool allowlists and prompts.
 2. Stop the old generation and all Review writers before switching. Preserve the previous build and configuration. If an older `review.json` exists, move it to a private archive outside the active data root. The new writer starts a relation-only schema-v9 log and refuses to overwrite an unsupported existing file.
 3. Retain the skill-relation graph and its source registry, existing sessions and statistics, skill indexes, shared embedding cache, and archived experience data. The cutover does not require rebuilding the graph or clearing historical data. New routed turns record skill selections, and new counts use those selected skills.
 4. Start the matching build and configuration. Verify the three public tools, skill-only prompt output on an eligible request, and a relation Review receipt if Review is enabled. To roll back, stop the new generation, preserve its log separately, and restore the old build, configuration and compatible Review log together.
@@ -392,7 +392,7 @@ Skill-index refresh warnings include a JSON diagnostic suffix with the index fin
 
 Inventory failure diagnostics identify the root category, operation phase and fixed error classification. Private paths and source content are excluded.
 
-An `agent_end` taking 25 seconds emits one slow warning with its current finalization, inventory, statistics or Review-preparation phase. If it later settles, a completion message records elapsed time and outcome. This observes slow work without cancelling it or extending the host timeout; an unsettled warning alone does not prove the cause of a timeout.
+The plugin keeps the turn open through provider fallback attempts and finalizes it when OpenClaw publishes the settled run outcome. Statistics and Review cadence use that outcome. Finalization taking 25 seconds emits one slow warning with its current phase (finalization, inventory, statistics, or Review preparation). If the work finishes after the warning, a completion message records elapsed time and outcome. The timer only reports progress.
 
 ### Verify relation Review after an upgrade
 

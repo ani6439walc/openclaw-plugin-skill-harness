@@ -33,6 +33,33 @@ function createMockCandidate(
 }
 
 describe("IntentReviewScheduler", () => {
+  it("keeps sparse candidates with distinct snapshot session keys", async () => {
+    const runReview = vi.fn(async (_candidate: ReviewCandidate) => {});
+    const scheduler = new IntentReviewScheduler({ idleDelayMs: 0, runReview });
+    const candidates = ["first", "second"].map((id) =>
+      createMockCandidate({
+        sessionKey: undefined,
+        ctx: { sessionKey: "" },
+        snapshot: {
+          ...createMockCandidate().snapshot,
+          sessionId: id,
+          sessionKey: `agent:main:${id}`,
+        },
+      }),
+    );
+    try {
+      for (const candidate of candidates)
+        expect(scheduler.schedule(candidate)).toBe(true);
+      expect(scheduler.getPendingCount()).toBe(2);
+      await scheduler.waitForIdle();
+      expect(runReview.mock.calls.map(([candidate]) => candidate)).toEqual(
+        candidates,
+      );
+    } finally {
+      await scheduler.dispose();
+    }
+  });
+
   it("debounces multiple turns in the same session and reviews only the latest candidate", async () => {
     const executed: ReviewCandidate[] = [];
     const discarded: ReviewCandidate[] = [];

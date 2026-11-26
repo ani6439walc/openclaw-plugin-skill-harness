@@ -1,3 +1,7 @@
+import {
+  isAgentLifecycleYieldedWaiting,
+  resolveAgentRunLifecycleTerminalFacts,
+} from "openclaw/plugin-sdk/agent-lifecycle";
 import type { RelationDecision } from "../skills/related.js";
 import {
   expandRelatedCandidates,
@@ -21,11 +25,12 @@ import { IntentReviewLogWriter } from "../review/log-writer.js";
 import { isRelationReviewDue } from "../review/triggers.js";
 import type { getReviewModelRef } from "../review/subagent.js";
 import type { ReviewSnapshot } from "../review/types.js";
-import { createIntentReviewScheduler } from "../review/scheduler.js";
+import {
+  createIntentReviewScheduler,
+  isReviewSessionActive,
+  resolveReviewSessionKey,
+} from "../review/scheduler.js";
 import { createBackgroundRunner } from "../subagent-runtime.js";
-import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import {
   extractLatestUserMessage,
   limitConversationTurns,
@@ -60,7 +65,7 @@ import type {
   RelationReviewContext,
   RelationPreparationSummary,
 } from "../review/relations.js";
-import type { AvailableSkill, SkillInventoryItem } from "../skills/types.js";
+import type { AvailableSkill } from "../skills/types.js";
 import { matchAvailableSkillNamesWithTokens } from "../skills/name-index.js";
 import {
   buildCandidateSkillsUnionPool,
@@ -73,6 +78,8 @@ import {
   type SkillCandidatePoolFallbackReason,
 } from "./pipeline-events.js";
 import type {
+  AgentLifecycleEvent,
+  AttemptContext,
   HookDeps,
   PendingToolCall,
   PluginHookAfterToolCallEvent,
@@ -83,7 +90,6 @@ import type {
   PluginHookBeforePromptBuildEvent,
   PluginHookBeforePromptBuildResult,
   PluginHookBeforeToolCallEvent,
-  PluginHookMessageSendingEvent,
   PluginHookSessionContext,
   PluginHookSessionEndEvent,
   PluginHookToolContext,
@@ -91,7 +97,11 @@ import type {
   PluginHookToolResultPersistEvent,
 } from "./types.js";
 import {
+  canUpdateSessionKey,
+  normalizeTurnAssociationKey,
+  SESSION_KEY_PRIORITY,
   TurnAssociationRegistry,
+  type SessionKeyVersion,
   type TurnAssociation,
 } from "./turn-associations.js";
 import { ToolFallbackRegistry } from "./tool-fallback-registry.js";
@@ -112,8 +122,152 @@ import {
 } from "./prompt-executions.js";
 import { promptRoutingBudgetMs, withPromptDeadline } from "./prompt-budget.js";
 
-type AgentEndPhase = "finalize" | "inventory" | "stats" | "review-preparation";
-type AgentEndPhaseObserver = (phase: AgentEndPhase) => void;
+type TurnFinalizationPhase =
+  "finalize" | "inventory" | "stats" | "review-preparation";
+type TurnFinalizationPhaseObserver = (phase: TurnFinalizationPhase) => void;
+
+interface ObservedAttempt {
+  sequence: number;
+  result?: string;
+  error?: string;
+  success: boolean;
+  ctx: AttemptContext;
+}
+
+interface PendingNativeRun extends SessionKeyVersion {
+  owner: object;
+  request?: PromptRequestOwner<string | undefined>;
+  sessionId?: string;
+  sessionKey?: string;
+  invocations: number;
+  attempts: Map<string, ObservedAttempt>;
+  settlements: Map<string, AgentLifecycleEvent>;
+}
+
+const maxPendingCallbacksPerRun = 8;
+
+function updatePendingSessionKey(
+  pending: PendingNativeRun | undefined,
+  sessionKey: string | undefined,
+  version: SessionKeyVersion,
+): void {
+  const normalized = normalizeTurnAssociationKey(sessionKey);
+  if (!pending || !normalized) return;
+  if (!pending.sessionKey || canUpdateSessionKey(pending, version)) {
+    pending.sessionKey = normalized;
+    pending.sessionKeyPriority = version.sessionKeyPriority;
+    pending.sessionKeySeq = version.sessionKeySeq;
+  }
+}
+
+function getPendingEffectiveSessionKey(
+  pending: PendingNativeRun | undefined,
+): string | undefined {
+  if (!pending) return;
+  const request = pending.request;
+  const sharedHostKey =
+    request?.sessionKeyPriority === SESSION_KEY_PRIORITY.host
+      ? normalizeTurnAssociationKey(request.resolvedSessionKey)
+      : undefined;
+  const localKey = pending.sessionKey;
+  if (
+    request &&
+    sharedHostKey &&
+    (!localKey || canUpdateSessionKey(pending, request))
+  )
+    return sharedHostKey;
+  return localKey;
+}
+
+function evictUnverifiedKey<T>(
+  callbacks: Map<string, T>,
+  verifiedSlot: string | undefined,
+): boolean {
+  for (const slot of callbacks.keys()) {
+    if (slot && slot !== verifiedSlot) return callbacks.delete(slot);
+  }
+  return false;
+}
+
+function matchPendingCallback<T>(
+  callbacks: Map<string, T>,
+  association: TurnAssociation,
+  getSessionId: (callback: T) => string | undefined,
+): T | undefined {
+  for (const key of [association.sessionKey, ""]) {
+    if (key === undefined) continue;
+    const callback = callbacks.get(key);
+    if (!callback) continue;
+    const sessionId = getSessionId(callback);
+    if (
+      sessionId === association.sessionId ||
+      (sessionId === undefined && key !== "")
+    )
+      return callback;
+  }
+}
+
+function attemptKey(association: TurnAssociation): string {
+  return `${association.sessionId}\0${association.turnKey}`;
+}
+
+function attemptSlotKey(
+  ctx: Pick<AttemptContext, "sessionId" | "sessionKey">,
+): string {
+  const sessionKey = normalizeTurnAssociationKey(ctx.sessionKey);
+  if (sessionKey) return `key:${sessionKey}`;
+  const sessionId = normalizeTurnAssociationKey(ctx.sessionId);
+  if (sessionId) return `id:${sessionId}`;
+  return "run-only";
+}
+
+function attemptIdentityTier(
+  attempt: ObservedAttempt,
+  association: TurnAssociation,
+): 0 | 1 | 2 {
+  const sessionId = normalizeTurnAssociationKey(attempt.ctx.sessionId);
+  const sessionKey = normalizeTurnAssociationKey(attempt.ctx.sessionKey);
+  if (
+    (sessionId && sessionId !== association.sessionId) ||
+    (sessionKey &&
+      sessionKey !== association.sessionKey &&
+      sessionKey !== association.sessionId)
+  )
+    return 0;
+  return sessionId || sessionKey ? 2 : 1;
+}
+
+function selectBestAttempt(
+  candidates: Iterable<ObservedAttempt> | undefined,
+  association: TurnAssociation,
+): ObservedAttempt | undefined {
+  let best: ObservedAttempt | undefined;
+  let bestTier = 0;
+  for (const attempt of candidates ?? []) {
+    const tier = attemptIdentityTier(attempt, association);
+    if (
+      tier > bestTier ||
+      (tier === bestTier && best && attempt.sequence > best.sequence)
+    ) {
+      best = attempt;
+      bestTier = tier;
+    }
+  }
+  return best;
+}
+
+function extractTerminalReplyText(reply: unknown): string | undefined {
+  if (
+    !reply ||
+    typeof reply !== "object" ||
+    !("disposition" in reply) ||
+    reply.disposition !== "visible" ||
+    !("text" in reply) ||
+    typeof reply.text !== "string"
+  )
+    return;
+  return reply.text.trim() || undefined;
+}
 
 function eventError(error: unknown): string {
   const message = error instanceof Error ? error.message : "Unknown error";
@@ -236,7 +390,6 @@ export function createHookHandlers(deps: HookDeps) {
           };
         }
       : runJevUnifiedRouting);
-  const clock = deps.clock ?? (() => new Date());
   const qmdSkillIndex = deps.qmdSkillIndex;
 
   const reviewLogWriter: NonNullable<HookDeps["reviewLogWriter"]> =
@@ -245,25 +398,38 @@ export function createHookHandlers(deps: HookDeps) {
   const bundledSkillsDir = deps.bundledSkillsDir;
   const nativeBundledSkillsDir = deps.nativeBundledSkillsDir;
   const sharedRoots = () => deps.getSharedRoots?.() ?? [];
+  const observedAttempts = new Map<string, Map<string, ObservedAttempt>>();
+  const maxObservedAttempts = 4096;
   const pendingToolCalls = new Map<string, PendingToolCall>();
   const toolFallbacks = deps.toolFallbacks ?? new ToolFallbackRegistry();
-  const recordedToolCalls = new Set<string>();
+  const recordedToolCalls = new Map<string, string>();
+  const maxRecordedToolCalls = 4096;
+  function rememberToolCall(key: string, sessionId: string): void {
+    recordedToolCalls.set(key, sessionId);
+    if (recordedToolCalls.size > maxRecordedToolCalls) {
+      const oldest = recordedToolCalls.keys().next().value;
+      if (oldest !== undefined) recordedToolCalls.delete(oldest);
+    }
+  }
   const promptExecutions = new PromptExecutions<string | undefined>(
     api.lifecycle?.signal,
   );
   const anonymousPreparations = new Map<string, Promise<unknown>>();
   const turnAssociations =
     deps.turnAssociations ?? new TurnAssociationRegistry();
+  // Only admitted native fences can enter this map, so its run IDs share the
+  // registry's capacity limit. Staged events live only while a bind can follow.
+  const pendingNativeRuns = new Map<string, PendingNativeRun>();
+  let nextPromptInvocationSeq = 0;
+  let nextObservedAttemptSeq = 0;
 
   const reviewScheduler =
     deps.reviewScheduler ??
     createIntentReviewScheduler({
       signal: api.lifecycle?.signal,
       runInBackgroundContext: createBackgroundRunner(api.lifecycle),
-      isSystemActive: (candidate) => {
-        const sessionKey = candidate.sessionKey ?? candidate.ctx.sessionKey;
-        return turnAssociations.resolveSession(sessionKey) !== undefined;
-      },
+      isSystemActive: (candidate) =>
+        isReviewSessionActive(turnAssociations, candidate),
     });
 
   reviewScheduler.setRunner(async (candidate, abortSignal) => {
@@ -347,7 +513,7 @@ export function createHookHandlers(deps: HookDeps) {
       config: candidate.resolvedConfig,
       agentId: candidate.agentId,
       relationContext,
-      sessionKey: candidate.ctx.sessionKey ?? candidate.snapshot.sessionKey,
+      sessionKey: resolveReviewSessionKey(candidate),
       messageProvider: candidate.ctx.messageProvider,
       modelRef: candidate.modelRef,
       snapshot: candidate.snapshot,
@@ -385,7 +551,7 @@ export function createHookHandlers(deps: HookDeps) {
     );
   });
 
-  interface PromptBuildIdentity {
+  interface PromptBuildIdentity extends SessionKeyVersion {
     effectiveAgentId: string;
     resolvedSessionKey?: string;
     association?: TurnAssociation;
@@ -396,12 +562,21 @@ export function createHookHandlers(deps: HookDeps) {
     ctx: PluginHookAgentContext,
     request: PromptRequestOwner<string | undefined> | undefined,
     nativeAdmission: boolean,
+    sessionKeySeq: number,
   ): Promise<PromptBuildIdentity> {
     const resolvedAgentId = resolveStatusUpdateAgentId(ctx);
     let resolvedSessionKey = ctx.sessionKey?.trim() || undefined;
+    let sessionKeyPriority: SessionKeyVersion["sessionKeyPriority"] =
+      resolvedSessionKey
+        ? SESSION_KEY_PRIORITY.host
+        : SESSION_KEY_PRIORITY.none;
     if (!resolvedSessionKey && resolvedAgentId) {
       if (request?.state === "finalized") {
         resolvedSessionKey = request.resolvedSessionKey;
+        if (resolvedSessionKey) {
+          sessionKeyPriority = request.sessionKeyPriority;
+          sessionKeySeq = request.sessionKeySeq ?? sessionKeySeq;
+        }
       } else if (!nativeAdmission || request) {
         const lookup = () =>
           resolveCanonicalSessionKeyFromSessionId({
@@ -412,9 +587,114 @@ export function createHookHandlers(deps: HookDeps) {
         resolvedSessionKey = request
           ? await promptExecutions.lookupRequest(request, lookup)
           : await promptExecutions.track(lookup());
+        if (normalizeTurnAssociationKey(resolvedSessionKey))
+          sessionKeyPriority = SESSION_KEY_PRIORITY.sdk;
       }
     }
-    return { effectiveAgentId: resolvedAgentId, resolvedSessionKey, request };
+    resolvedSessionKey = resolvedSessionKey?.trim() || undefined;
+    if (
+      !resolvedSessionKey &&
+      resolvedAgentId &&
+      ctx.sessionId &&
+      request?.admissionId !== undefined
+    ) {
+      resolvedSessionKey =
+        tracker
+          .getNativeTurnIdentity?.(
+            ctx.sessionId,
+            resolvedAgentId,
+            request.admissionId,
+          )
+          ?.sessionKey?.trim() || undefined;
+      if (resolvedSessionKey)
+        sessionKeyPriority = SESSION_KEY_PRIORITY.persisted;
+    }
+    return {
+      effectiveAgentId: resolvedAgentId,
+      resolvedSessionKey,
+      sessionKeyPriority,
+      sessionKeySeq,
+      request,
+    };
+  }
+
+  function retainPromptSessionKey(
+    request: PromptRequestOwner<string | undefined>,
+    identity: PromptBuildIdentity,
+    options?: { independentLookup?: boolean },
+  ): void {
+    const shareIdentity =
+      !options?.independentLookup ||
+      identity.sessionKeyPriority === SESSION_KEY_PRIORITY.host;
+    const useShared =
+      !options?.independentLookup ||
+      request.sessionKeyPriority === SESSION_KEY_PRIORITY.host;
+    if (
+      shareIdentity &&
+      identity.resolvedSessionKey &&
+      (!request.resolvedSessionKey || canUpdateSessionKey(request, identity))
+    ) {
+      request.resolvedSessionKey = identity.resolvedSessionKey;
+      request.sessionKeyPriority = identity.sessionKeyPriority;
+      request.sessionKeySeq = identity.sessionKeySeq;
+    } else if (
+      useShared &&
+      request.resolvedSessionKey &&
+      (!identity.resolvedSessionKey || canUpdateSessionKey(identity, request))
+    ) {
+      identity.resolvedSessionKey = request.resolvedSessionKey;
+      identity.sessionKeyPriority = request.sessionKeyPriority;
+      identity.sessionKeySeq = request.sessionKeySeq;
+    }
+  }
+
+  async function bindNativeReplay(
+    runId: string | undefined,
+    owner: PromptRequestOwner<string | undefined>,
+    replay: TurnAssociation,
+    identity: PromptBuildIdentity,
+  ): Promise<boolean> {
+    if (!identity.resolvedSessionKey && replay.sessionKey) {
+      identity.resolvedSessionKey = replay.sessionKey;
+      identity.sessionKeyPriority = SESSION_KEY_PRIORITY.persisted;
+    }
+    const bound = turnAssociations.bindNativeRun(
+      runId,
+      owner,
+      {
+        ...replay,
+        sessionKey: identity.resolvedSessionKey,
+      },
+      {
+        sessionKeyPriority: identity.sessionKeyPriority,
+        sessionKeySeq: identity.sessionKeySeq,
+      },
+    );
+    if (replay.finalized) turnAssociations.markAssociationTerminal(replay);
+    if (!runId || bound !== "bound" || replay.finalized) return false;
+    return drainPendingNativeRun(runId, owner);
+  }
+
+  async function drainPendingNativeRun(
+    runId: string,
+    owner: object,
+  ): Promise<boolean> {
+    const pending = pendingNativeRuns.get(runId);
+    if (pending?.owner !== owner) return false;
+    const association = turnAssociations.resolve(runId);
+    if (!association) return false;
+
+    const settlement = matchPendingCallback(
+      pending.settlements,
+      association,
+      (candidate) => candidate.sessionId,
+    );
+    // An in-flight lookup can still bind a newer canonical key for this run.
+    if (!settlement) return false;
+    promotePendingAttempts(pending, association);
+    pendingNativeRuns.delete(runId);
+    await onAgentLifecycleEvent(settlement);
+    return true;
   }
 
   async function prepareTrackingTurn(params: {
@@ -438,11 +718,11 @@ export function createHookHandlers(deps: HookDeps) {
         params.routing.resolvedSessionKey ||
         params.ctx.sessionKey?.trim() ||
         undefined;
-      const assertActive = () => {
-        promptExecutions.assertRequestCurrent(request);
+      const assertActive = (allowFinalized = false) => {
+        promptExecutions.assertRequestCurrent(request, allowFinalized);
         params.ctx.hookInvocation?.assertActive();
       };
-      const association = await promptExecutions.prepareRequest(
+      const preparedAssociation = await promptExecutions.prepareRequest(
         request,
         async () => {
           assertActive();
@@ -457,11 +737,13 @@ export function createHookHandlers(deps: HookDeps) {
             recentTurns: params.recentTurns,
             assertActive,
           });
-          assertActive();
+          assertActive(
+            "identity" in prepared && prepared.identity.finalized === true,
+          );
           if (!("identity" in prepared)) return;
           return {
             sessionId,
-            sessionKey: prepared.identity.sessionKey ?? hostSessionKey,
+            sessionKey: hostSessionKey || prepared.identity.sessionKey,
             turnKey: prepared.identity.turnKey,
             ...(prepared.identity.finalized
               ? { finalized: true as const }
@@ -469,11 +751,31 @@ export function createHookHandlers(deps: HookDeps) {
           };
         },
       );
-      assertActive();
-      if (!association) return;
+      assertActive(preparedAssociation?.finalized === true);
+      if (!preparedAssociation) return;
+      const association = {
+        ...preparedAssociation,
+        sessionKey: hostSessionKey || preparedAssociation.sessionKey,
+      };
       if (runId) {
         // An ambiguous run alias must not conflate independent admissions.
-        turnAssociations.bindNativeRun(runId, request, association);
+        const bound = turnAssociations.bindNativeRun(
+          runId,
+          request,
+          association,
+          {
+            sessionKeyPriority: hostSessionKey
+              ? params.routing.sessionKeyPriority
+              : SESSION_KEY_PRIORITY.persisted,
+            sessionKeySeq: params.routing.sessionKeySeq,
+          },
+        );
+        if (
+          bound === "bound" &&
+          !association.finalized &&
+          (await drainPendingNativeRun(runId, request))
+        )
+          return;
       } else {
         const reservation = turnAssociations.reserveAnonymous();
         if (reservation.status === "reserved")
@@ -567,10 +869,15 @@ export function createHookHandlers(deps: HookDeps) {
         }
         return;
       }
-      const association = {
+      const association: TurnAssociation = {
         sessionId,
-        sessionKey: params.routing.resolvedSessionKey ?? params.ctx.sessionKey,
+        sessionKey:
+          params.routing.resolvedSessionKey ||
+          params.ctx.sessionKey?.trim() ||
+          prepared.identity.sessionKey ||
+          undefined,
         turnKey: prepared.identity.turnKey,
+        ...(prepared.identity.finalized ? { finalized: true as const } : {}),
       };
       const bound =
         reservation.status === "reserved"
@@ -578,7 +885,14 @@ export function createHookHandlers(deps: HookDeps) {
             ? turnAssociations.bind(reservation.token, runId, association)
             : turnAssociations.bindAnonymous(reservation.token, association)
           : turnAssociations.bindExisting(runId, association);
-      return bound === "bound" ? association : undefined;
+      if (bound !== "bound") return;
+      if (association.finalized) {
+        promptExecutions.finalizeAssociation(association);
+        turnAssociations.markAssociationTerminal(association);
+        toolFallbacks.markAssociationTerminal(association);
+        return;
+      }
+      return association;
     } catch (error) {
       if (reservation.status === "reserved") {
         turnAssociations.release(reservation.token);
@@ -597,9 +911,12 @@ export function createHookHandlers(deps: HookDeps) {
     const contextRunId = params.contextRunId?.trim();
     if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
     const runId = eventRunId || contextRunId;
-    const sessionIdentity = params.sessionId ?? params.sessionKey;
+    const sessionKey = params.sessionKey?.trim();
+    const sessionIdentity = params.sessionId ?? sessionKey;
+    const unseenRun =
+      runId && !turnAssociations.hasRun(runId) ? runId : undefined;
     const association = runId
-      ? turnAssociations.hasRun(runId)
+      ? !unseenRun
         ? turnAssociations.resolve(runId)
         : turnAssociations.unknownRunFallbackEnabled
           ? turnAssociations.resolveAnonymousSession(sessionIdentity)
@@ -610,12 +927,14 @@ export function createHookHandlers(deps: HookDeps) {
       (params.sessionId &&
         association.sessionId !== params.sessionId &&
         association.sessionKey !== params.sessionId) ||
-      (params.sessionKey &&
-        association.sessionKey !== params.sessionKey &&
-        association.sessionId !== params.sessionKey)
+      (sessionKey &&
+        association.sessionKey !== sessionKey &&
+        association.sessionId !== sessionKey)
     ) {
       return;
     }
+    if (unseenRun && !turnAssociations.pinAnonymousRun(unseenRun, association))
+      return;
     return association;
   }
 
@@ -747,20 +1066,16 @@ export function createHookHandlers(deps: HookDeps) {
     let nameCandidates: SkillDiscoveryCandidate[] = [];
     let matchedTokens: string[] = [];
     let fallbackReason: SkillCandidatePoolFallbackReason | undefined;
-    let nameMatchStatus: "completed" | "disabled" | "error" =
-      policy.maxInjectedSkills === 0 ? "disabled" : "completed";
+    let nameMatchStatus: "completed" | "error" = "completed";
     let nameMatchError: string | undefined;
     const nameMatchStartedAtMs = Date.now();
 
     try {
-      const nameMatchResult =
-        policy.maxInjectedSkills === 0
-          ? { candidates: [], matchedTokens: [] }
-          : matchAvailableSkillNamesWithTokens({
-              skills: visibleSkills,
-              input: params.latestUserMessage,
-              options: policy.nameMatch,
-            });
+      const nameMatchResult = matchAvailableSkillNamesWithTokens({
+        skills: visibleSkills,
+        input: params.latestUserMessage,
+        options: policy.nameMatch,
+      });
       nameCandidates = nameMatchResult.candidates.map((candidate) => ({
         ...candidate,
         collections: ["meta" as const],
@@ -808,16 +1123,14 @@ export function createHookHandlers(deps: HookDeps) {
 
     const searchSkills = async () => {
       const searchStartedAtMs = Date.now();
-      let status:
-        "completed" | "disabled" | "unavailable" | "timeout" | "error" =
-        policy.maxInjectedSkills === 0 ? "disabled" : "unavailable";
+      let status: "completed" | "unavailable" | "timeout" | "error" =
+        "unavailable";
       let searchError: string | undefined;
       let searchReason: string | undefined;
       let searchConfidence: number | undefined;
       let hits: { id: string; semanticScore: number | null }[] = [];
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        if (policy.maxInjectedSkills === 0) return;
         if (!qmdSkillIndex) {
           fallbackReason = "retrieval-unavailable";
           searchError = "qmd skill index unavailable";
@@ -1115,11 +1428,14 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookBeforePromptBuildEvent,
     ctx: PluginHookAgentContext,
   ): Promise<PluginHookBeforePromptBuildResult | undefined> {
+    const invocationSeq = ++nextPromptInvocationSeq;
+    const runId = normalizeTurnAssociationKey(ctx.runId);
     let resolvedSessionKey = ctx.sessionKey;
     let staticContextEligible = false;
     let workingSetSkillsXml: string | undefined;
     let intentContextEnabled = false;
     let request: PromptRequestOwner<string | undefined> | undefined;
+    let pendingNative: PendingNativeRun | undefined;
     try {
       ctx.hookInvocation?.assertActive();
       // Preserve static-only fallback after dynamic shutdown for a supplied key.
@@ -1147,7 +1463,6 @@ export function createHookHandlers(deps: HookDeps) {
       const ownerSessionId =
         ctx.sessionId ??
         tracker.resolveCurrentSessionId?.({ sessionKey: ctx.sessionKey });
-      const runId = ctx.runId?.trim() || undefined;
       const legacyInput =
         admissionId === undefined && !runId
           ? buildConversationContext(
@@ -1169,40 +1484,122 @@ export function createHookHandlers(deps: HookDeps) {
               tracker.getNativeTurnIdentity?.(sessionId, agentId, id),
           )
         : undefined;
-      if (admissionId !== undefined && ctx.runId) {
-        // This is an event-rejection fence, not a turn reservation or admission.
-        turnAssociations.claimNativeRun(
-          ctx.runId,
-          request ?? {},
+      const nativeRequest =
+        request?.admissionId !== undefined ? request : undefined;
+      const replay =
+        nativeRequest?.retainedReplay ??
+        (nativeRequest?.state !== "current"
+          ? nativeRequest?.association
+          : undefined);
+      const hostKey = normalizeTurnAssociationKey(ctx.sessionKey);
+      let nativeClaim: "claimed" | "same-owner" | "blocked" | undefined;
+      if (admissionId !== undefined && runId) {
+        const owner = request ?? {};
+        nativeClaim = turnAssociations.claimNativeRun(
+          runId,
+          owner,
           ownerSessionId,
+          hostKey,
+          request?.association ?? request?.retainedReplay,
+          {
+            sessionKeyPriority: SESSION_KEY_PRIORITY.host,
+            sessionKeySeq: invocationSeq,
+          },
         );
-      }
-      if (request?.retainedReplay) {
-        const old = request.retainedReplay;
-        if (runId) {
-          const sessionKey = old.sessionKey ?? ctx.sessionKey?.trim();
-          turnAssociations.bindNativeRun(runId, request, {
-            ...old,
-            sessionKey,
+        if (nativeClaim === "blocked") {
+          pendingNativeRuns.delete(runId);
+        } else if (!replay?.finalized && request?.state !== "finalized") {
+          pendingNative = pendingNativeRuns.get(runId) ?? {
+            owner,
+            request,
+            sessionId: ownerSessionId,
+            invocations: 0,
+            attempts: new Map(),
+            settlements: new Map(),
+          };
+          updatePendingSessionKey(pendingNative, hostKey, {
+            sessionKeyPriority: SESSION_KEY_PRIORITY.host,
+            sessionKeySeq: invocationSeq,
           });
+          pendingNative.invocations++;
+          pendingNativeRuns.set(runId, pendingNative);
         }
-        if (old.finalized) turnAssociations.markAssociationTerminal(old);
-        return;
       }
       const assertRequestActive = (allowFinalized = false) => {
         ctx.hookInvocation?.assertActive();
         promptExecutions.assertActive();
-        if (request)
+        if (request && !replay)
           promptExecutions.assertRequestCurrent(request, allowFinalized);
       };
       assertRequestActive(true);
+      if (
+        nativeRequest &&
+        hostKey &&
+        nativeClaim !== "blocked" &&
+        !replay?.finalized &&
+        nativeRequest.state !== "finalized"
+      ) {
+        retainPromptSessionKey(nativeRequest, {
+          effectiveAgentId: resolveStatusUpdateAgentId(ctx),
+          resolvedSessionKey: hostKey,
+          sessionKeyPriority: SESSION_KEY_PRIORITY.host,
+          sessionKeySeq: invocationSeq,
+          request: nativeRequest,
+        });
+      }
+      const independentLookup = Boolean(replay);
       const routing = await resolvePromptBuildIdentity(
         ctx,
-        request,
-        admissionId !== undefined,
+        independentLookup ? undefined : request,
+        !independentLookup && admissionId !== undefined,
+        invocationSeq,
       );
       assertRequestActive(true);
-      if (request) request.resolvedSessionKey = routing.resolvedSessionKey;
+      async function bindTrackedNativeAdmission(): Promise<void> {
+        if (!nativeRequest) return;
+        let tracked = nativeRequest.retainedReplay ?? nativeRequest.association;
+        if (!tracked && nativeRequest.preparation) {
+          const prepared = await nativeRequest.preparation.catch(
+            () => undefined,
+          );
+          assertRequestActive(true);
+          retainPromptSessionKey(nativeRequest, routing, { independentLookup });
+          updatePendingSessionKey(
+            pendingNative,
+            routing.resolvedSessionKey,
+            routing,
+          );
+          tracked =
+            nativeRequest.retainedReplay ??
+            nativeRequest.association ??
+            prepared;
+        }
+        if (tracked) {
+          await bindNativeReplay(runId, nativeRequest, tracked, routing);
+          assertRequestActive(true);
+        }
+      }
+      if (nativeRequest) {
+        retainPromptSessionKey(nativeRequest, routing, { independentLookup });
+        updatePendingSessionKey(
+          pendingNative,
+          routing.resolvedSessionKey,
+          routing,
+        );
+        turnAssociations.updatePendingNativeRunSessionKey(
+          runId,
+          nativeRequest,
+          routing.resolvedSessionKey,
+          routing,
+        );
+        if (
+          nativeRequest.retainedReplay ||
+          nativeRequest.association ||
+          nativeRequest.preparation
+        )
+          await bindTrackedNativeAdmission();
+        if (nativeRequest.retainedReplay) return;
+      }
       resolvedSessionKey = routing.resolvedSessionKey ?? resolvedSessionKey;
 
       const resolvedContext = {
@@ -1225,11 +1622,26 @@ export function createHookHandlers(deps: HookDeps) {
         resolveWorkingSetSkillsXml(routing.effectiveAgentId),
       );
       assertRequestActive(true);
+      if (nativeRequest) {
+        retainPromptSessionKey(nativeRequest, routing, { independentLookup });
+        updatePendingSessionKey(
+          pendingNative,
+          routing.resolvedSessionKey,
+          routing,
+        );
+        // A no-op await here would let another invocation start preparation
+        // between checking for tracked work and deciding whether to route.
+        if (nativeRequest.association || nativeRequest.preparation)
+          await bindTrackedNativeAdmission();
+        resolvedSessionKey = routing.resolvedSessionKey ?? resolvedSessionKey;
+        resolvedContext.sessionKey = resolvedSessionKey;
+      }
       if (
         admissionId !== undefined &&
-        (!request || request.state === "finalized")
-      )
+        (!request || replay || request.state === "finalized")
+      ) {
         return toPromptBuildResult(undefined, workingSetSkillsXml);
+      }
       intentContextEnabled = isEnabledForAgent(
         refreshedConfig,
         routing.effectiveAgentId,
@@ -1262,7 +1674,10 @@ export function createHookHandlers(deps: HookDeps) {
         ctx,
         routing,
         latestUserMessage,
-        recentTurns: extractRecentTurns(event.messages),
+        recentTurns:
+          admissionId === undefined
+            ? extractRecentTurns(event.messages, { finalRepliesOnly: true })
+            : undefined,
       });
       assertRequestActive(true);
       if (!routing.association) {
@@ -1339,9 +1754,7 @@ export function createHookHandlers(deps: HookDeps) {
               });
 
               const relationGraph =
-                refreshedConfig.routing.skills.maxInjectedSkills > 0 &&
-                unionPool.candidateSkills.length > 0 &&
-                deps.dataRoot
+                unionPool.candidateSkills.length > 0 && deps.dataRoot
                   ? await resolveRelationGraph(
                       deps.dataRoot,
                       skillDiscoveryResult.visibleSkills,
@@ -1359,7 +1772,7 @@ export function createHookHandlers(deps: HookDeps) {
                 expanded: related.candidateSkills,
                 expandedNames: related.added,
                 visibleSkills: skillDiscoveryResult.visibleSkills,
-                enabled: refreshedConfig.routing.skills.maxInjectedSkills > 0,
+                enabled: true,
               });
               const relationEvidence = collectRelationEvidence(
                 superset.candidateSkills,
@@ -1383,9 +1796,7 @@ export function createHookHandlers(deps: HookDeps) {
                 ]),
               );
 
-              if (superset.candidateSkills.length === 0) {
-                matchedSkills = [];
-              } else {
+              if (superset.candidateSkills.length > 0) {
                 try {
                   const llmResult = await withPromptDeadline(
                     refreshedConfig.routing.timeoutMs,
@@ -1441,7 +1852,6 @@ export function createHookHandlers(deps: HookDeps) {
                   } else {
                     rerankStatus = "unavailable";
                     rerankError = "Routing selection unavailable";
-                    matchedSkills = [];
                   }
                 } catch (error) {
                   rerankStatus = "error";
@@ -1451,7 +1861,6 @@ export function createHookHandlers(deps: HookDeps) {
                       reason: "selection-failed",
                     })}`,
                   );
-                  matchedSkills = [];
                 }
               }
 
@@ -1531,9 +1940,7 @@ export function createHookHandlers(deps: HookDeps) {
 
               const inputSkillDiscovery: InputSkillDiscovery = {
                 nameCandidates: skillDiscoveryResult.nameCandidates.length,
-                retrievalAttempted:
-                  Boolean(qmdSkillIndex) &&
-                  refreshedConfig.routing.skills.maxInjectedSkills > 0,
+                retrievalAttempted: Boolean(qmdSkillIndex),
                 retrievalCandidates:
                   skillDiscoveryResult.retrievalCandidates.length,
                 retrievalSemanticScores:
@@ -1555,14 +1962,23 @@ export function createHookHandlers(deps: HookDeps) {
                 ),
               };
 
-              await recordPromptBuildSession({
-                assertActive,
-                association: routing.association,
-                latestUserMessage,
-                matchedSkills,
-                inputSkillDiscovery,
-                confidence,
-              });
+              const preservePersistedSelection =
+                request?.admissionId !== undefined &&
+                rerankStatus !== "completed" &&
+                Boolean(
+                  tracker.getCurrentState(association.sessionId)?.matchedSkills
+                    ?.length,
+                );
+              if (!preservePersistedSelection) {
+                await recordPromptBuildSession({
+                  assertActive,
+                  association,
+                  latestUserMessage,
+                  matchedSkills,
+                  inputSkillDiscovery,
+                  confidence,
+                });
+              }
               assertActive();
 
               emitPipelineEvent(
@@ -1624,6 +2040,21 @@ export function createHookHandlers(deps: HookDeps) {
           )
         : undefined;
     } finally {
+      if (
+        runId &&
+        pendingNative &&
+        --pendingNative.invocations === 0 &&
+        pendingNativeRuns.get(runId) === pendingNative
+      ) {
+        pendingNativeRuns.delete(runId);
+        const association = turnAssociations.resolve(runId);
+        if (association) {
+          promotePendingAttempts(pendingNative, association);
+        } else {
+          for (const settlement of pendingNative.settlements.values())
+            turnAssociations.markRunSettled(runId, settlement);
+        }
+      }
       if (request) promptExecutions.releaseRequest(request);
     }
   }
@@ -1686,7 +2117,7 @@ export function createHookHandlers(deps: HookDeps) {
       },
     });
     if (toolCallKey && merged === "applied") {
-      recordedToolCalls.add(toolCallKey);
+      rememberToolCall(toolCallKey, association.sessionId);
       pendingToolCalls.delete(toolCallKey);
       toolFallbacks.delete(toolCallKey);
     }
@@ -1702,14 +2133,13 @@ export function createHookHandlers(deps: HookDeps) {
       sessionId: ctx.sessionId,
       sessionKey: ctx.sessionKey,
     });
-    if (!toolCallKey) return;
     const association = resolveAssociatedTurn({
       eventRunId: event.runId,
       contextRunId: ctx.runId,
       sessionId: ctx.sessionId,
       sessionKey: ctx.sessionKey,
     });
-    if (!association) return;
+    if (!association || !toolCallKey) return;
     pendingToolCalls.set(toolCallKey, {
       name: event.toolName,
       params: event.params,
@@ -1762,7 +2192,6 @@ export function createHookHandlers(deps: HookDeps) {
 
   function extractAgentEndPayload(params: {
     messages?: unknown[];
-    lastAssistantMessage?: string;
     error?: string;
   }): { result?: string; error?: string } {
     const lastAssistantMessage = (params.messages ?? [])
@@ -1787,14 +2216,14 @@ export function createHookHandlers(deps: HookDeps) {
             : undefined;
 
     return {
-      result: result || params.lastAssistantMessage,
+      result: result || undefined,
       error: params.error,
     };
   }
 
-  async function recordAgentEndStats(
+  async function recordFinalizedTurnStats(
     association: TurnAssociation,
-    observePhase?: AgentEndPhaseObserver,
+    observePhase?: TurnFinalizationPhaseObserver,
   ) {
     const { sessionId, turnKey } = association;
     const state = tracker.getTurnState(sessionId, turnKey);
@@ -1845,7 +2274,10 @@ export function createHookHandlers(deps: HookDeps) {
     try {
       return reviewScheduler.schedule({
         agentId: params.agentId,
-        sessionKey: params.ctx.sessionKey ?? params.snapshot.sessionKey,
+        sessionKey:
+          params.ctx.sessionKey?.trim() ||
+          params.snapshot.sessionKey?.trim() ||
+          undefined,
         ctx: params.ctx,
         resolvedConfig: params.resolvedConfig,
         modelRef: params.modelRef,
@@ -1860,12 +2292,11 @@ export function createHookHandlers(deps: HookDeps) {
   }
 
   async function finalizeTrackedTurn(
-    association: TurnAssociation | undefined,
-    ctx: PluginHookAgentContext,
-    observePhase?: AgentEndPhaseObserver,
+    association: TurnAssociation,
+    ctx: AttemptContext,
+    observePhase?: TurnFinalizationPhaseObserver,
   ): Promise<void> {
-    if (!association) return;
-    await recordAgentEndStats(association, observePhase);
+    await recordFinalizedTurnStats(association, observePhase);
 
     observePhase?.("review-preparation");
     const resolvedConfig = config();
@@ -1888,11 +2319,6 @@ export function createHookHandlers(deps: HookDeps) {
       const isReviewPreparationActive = () => {
         if (api.lifecycle?.signal?.aborted || reviewScheduler.isDisposed?.())
           return false;
-        try {
-          ctx.hookInvocation?.assertActive();
-        } catch {
-          return false;
-        }
         return (
           tracker.getReviewSnapshotForTurn(
             association.sessionId,
@@ -1928,33 +2354,246 @@ export function createHookHandlers(deps: HookDeps) {
     event: PluginHookAgentEndEvent,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
-    const eventRunId = event.runId;
+    const eventRunId = normalizeTurnAssociationKey(event.runId);
+    const contextRunId = normalizeTurnAssociationKey(ctx.runId);
+    if (eventRunId && contextRunId && eventRunId !== contextRunId) return;
+    const runId = eventRunId ?? contextRunId;
+    const sessionId = normalizeTurnAssociationKey(ctx.sessionId);
+    const sessionKey = normalizeTurnAssociationKey(ctx.sessionKey);
+
     const association = resolveAssociatedTurn({
-      eventRunId,
-      contextRunId: ctx.runId,
-      sessionId: ctx.sessionId,
-      sessionKey: ctx.sessionKey,
+      eventRunId: runId,
+      sessionId,
+      sessionKey,
     });
-    if (!association) return;
+    const pending =
+      !association && runId ? pendingNativeRuns.get(runId) : undefined;
+    if (
+      !association &&
+      (!pending ||
+        (sessionId && pending.sessionId && sessionId !== pending.sessionId))
+    )
+      return;
+
+    const attempt: ObservedAttempt = {
+      ...extractAgentEndPayload({
+        messages: event.messages,
+        error: event.error,
+      }),
+      sequence: ++nextObservedAttemptSeq,
+      success: event.success,
+      ctx: {
+        agentId: ctx.agentId,
+        sessionId: ctx.sessionId,
+        sessionKey: ctx.sessionKey,
+        runId: ctx.runId,
+        messageProvider: ctx.messageProvider,
+        modelProviderId: ctx.modelProviderId,
+        modelId: ctx.modelId,
+      },
+    };
+    if (association) {
+      rememberObservedAttempt(association, attempt);
+      await flushToolFallbacks(association);
+    } else if (pending) {
+      const slot = sessionKey ? `key:${sessionKey}` : "";
+      const attempts = pending.attempts;
+      const previous = attempts.get(slot);
+      if (
+        !slot &&
+        !sessionId &&
+        normalizeTurnAssociationKey(previous?.ctx.sessionId)
+      )
+        return;
+      if (!previous && attempts.size >= maxPendingCallbacksPerRun) {
+        const effectiveKey = getPendingEffectiveSessionKey(pending);
+        const verifiedKey = Boolean(sessionKey && sessionKey === effectiveKey);
+        const verifiedIdOnly = Boolean(
+          !sessionKey && sessionId && sessionId === pending.sessionId,
+        );
+        if (
+          (!verifiedKey && !verifiedIdOnly) ||
+          !evictUnverifiedKey(
+            attempts,
+            effectiveKey ? `key:${effectiveKey}` : undefined,
+          )
+        )
+          return;
+      }
+      attempts.set(slot, attempt);
+    }
+  }
+
+  function rememberObservedAttempt(
+    association: TurnAssociation,
+    attempt: ObservedAttempt,
+  ): void {
+    const tier = attemptIdentityTier(attempt, association);
+    if (tier === 0) return;
+    const key = attemptKey(association);
+    const attempts =
+      observedAttempts.get(key) ?? new Map<string, ObservedAttempt>();
+    const slot = attemptSlotKey(attempt.ctx);
+    const previous = attempts.get(slot);
+    if (previous && previous.sequence >= attempt.sequence) return;
+    if (!previous && attempts.size >= maxPendingCallbacksPerRun) {
+      // Evict incompatible provisional keys before displacing a run-only fallback.
+      for (const [candidateSlot, candidate] of attempts) {
+        if (attemptIdentityTier(candidate, association) === 0) {
+          attempts.delete(candidateSlot);
+          break;
+        }
+      }
+      if (attempts.size >= maxPendingCallbacksPerRun && tier === 2)
+        attempts.delete("run-only");
+      if (attempts.size >= maxPendingCallbacksPerRun) return;
+    }
+    attempts.set(slot, attempt);
+    observedAttempts.delete(key);
+    observedAttempts.set(key, attempts);
+    if (observedAttempts.size > maxObservedAttempts) {
+      const oldest = observedAttempts.keys().next().value;
+      if (oldest !== undefined) observedAttempts.delete(oldest);
+    }
+  }
+
+  function getObservedAttempt(
+    association: TurnAssociation,
+  ): ObservedAttempt | undefined {
+    return selectBestAttempt(
+      observedAttempts.get(attemptKey(association))?.values(),
+      association,
+    );
+  }
+
+  function promotePendingAttempts(
+    pending: PendingNativeRun,
+    association: TurnAssociation,
+  ): void {
+    for (const attempt of pending.attempts.values())
+      rememberObservedAttempt(association, attempt);
+  }
+
+  async function onAgentLifecycleEvent(
+    event: AgentLifecycleEvent,
+  ): Promise<void> {
+    const data = event.data;
+    const phase = data?.phase;
+    if (
+      event.stream !== "lifecycle" ||
+      (phase !== "end" && phase !== "error") ||
+      data.executionSettled !== true ||
+      isAgentLifecycleYieldedWaiting(data) ||
+      typeof event.runId !== "string" ||
+      !event.runId.trim()
+    )
+      return;
+
+    const runId = event.runId.trim();
+    const eventSessionId = normalizeTurnAssociationKey(event.sessionId);
+    const eventSessionKey = normalizeTurnAssociationKey(event.sessionKey);
+    const pending = pendingNativeRuns.get(runId);
+
+    const association = resolveAssociatedTurn({
+      eventRunId: runId,
+      sessionId: eventSessionId,
+      sessionKey: eventSessionKey,
+    });
+    if (!association) {
+      if (pending) {
+        if (
+          (!eventSessionId && !eventSessionKey) ||
+          (eventSessionId &&
+            pending.sessionId &&
+            eventSessionId !== pending.sessionId)
+        )
+          return;
+        const slot = eventSessionKey ?? "";
+        const settlements = pending.settlements;
+        if (
+          !settlements.has(slot) &&
+          settlements.size >= maxPendingCallbacksPerRun
+        ) {
+          const effectiveKey = getPendingEffectiveSessionKey(pending);
+          const verifiedKey = Boolean(
+            eventSessionKey && eventSessionKey === effectiveKey,
+          );
+          const verifiedIdOnly = Boolean(
+            !eventSessionKey &&
+            eventSessionId &&
+            eventSessionId === pending.sessionId,
+          );
+          if (
+            (!verifiedKey && !verifiedIdOnly) ||
+            !evictUnverifiedKey(settlements, effectiveKey)
+          )
+            return;
+        }
+        settlements.set(slot, {
+          ...event,
+          sessionId: eventSessionId,
+          sessionKey: eventSessionKey,
+        });
+      } else {
+        turnAssociations.markRunSettled(runId, event);
+      }
+      return;
+    }
+
+    if (pending) promotePendingAttempts(pending, association);
+    const key = attemptKey(association);
+    const observed = getObservedAttempt(association);
+    const facts = resolveAgentRunLifecycleTerminalFacts({ phase, data });
+    const result =
+      facts.status === "ok"
+        ? (observed?.success !== false ? observed?.result : undefined) ||
+          extractTerminalReplyText(data.terminalReply)
+        : observed?.result;
+    const error =
+      facts.status === "ok"
+        ? undefined
+        : (typeof data.error === "string" ? data.error.trim() : "") ||
+          observed?.error ||
+          facts.stopReason ||
+          facts.reason;
+    const endedAt =
+      typeof data.endedAt === "number" && Number.isFinite(data.endedAt)
+        ? data.endedAt
+        : Number.isFinite(event.ts)
+          ? event.ts
+          : Date.now();
+    const endedAtIso = new Date(endedAt);
+    const ctx: AttemptContext = {
+      ...observed?.ctx,
+      agentId:
+        observed?.ctx.agentId ?? tracker.getAgentId(association.sessionId),
+      sessionId: association.sessionId,
+      sessionKey:
+        event.sessionKey?.trim() ||
+        observed?.ctx.sessionKey ||
+        association.sessionKey,
+      runId: event.runId.trim(),
+    };
+
     const startedAt = Date.now();
-    let phase: AgentEndPhase = "finalize";
+    let finalizationPhase: TurnFinalizationPhase = "finalize";
     let phaseStartedAt = startedAt;
     let slow = false;
     let outcome: "completed" | "skipped" | "failed" = "completed";
-    const observePhase: AgentEndPhaseObserver = (next) => {
-      phase = next;
+    const observePhase: TurnFinalizationPhaseObserver = (next) => {
+      finalizationPhase = next;
       phaseStartedAt = Date.now();
     };
     const diagnostic = () => ({
-      hook: "agent_end",
-      phase,
+      hook: "agent_lifecycle",
+      phase: finalizationPhase,
       elapsedMs: Date.now() - startedAt,
       phaseElapsedMs: Date.now() - phaseStartedAt,
     });
-    // Observe the host's 30-second hook budget without cancelling or racing work.
+    // Observe slow finalization without cancelling or racing durable work.
     const slowTimer = setTimeout(() => {
       slow = true;
-      logger.warn(`agent_end slow ${JSON.stringify(diagnostic())}`);
+      logger.warn(`agent_lifecycle slow ${JSON.stringify(diagnostic())}`);
     }, 25_000);
     slowTimer.unref?.();
     try {
@@ -1963,17 +2602,15 @@ export function createHookHandlers(deps: HookDeps) {
         ([, { fallback, skillUsed }]) =>
           skillUsed ? { ...fallback, skillUsed } : fallback,
       );
-      const payload = extractAgentEndPayload({
-        messages: event.messages,
-        error: event.error,
-      });
       const finalized = await tracker.finalizeTurnFromAgentEnd({
         sessionId: association.sessionId,
         expectedTurnKey: association.turnKey,
         stagedToolFallbacks,
-        result: payload.result,
-        error: payload.error,
-        endedAt: new Date().toISOString(),
+        result,
+        error,
+        endedAt: Number.isNaN(endedAtIso.getTime())
+          ? new Date().toISOString()
+          : endedAtIso.toISOString(),
       });
       if (
         finalized !== "applied" &&
@@ -1986,6 +2623,7 @@ export function createHookHandlers(deps: HookDeps) {
       promptExecutions.finalizeAssociation(association);
       turnAssociations.markAssociationTerminal(association);
       toolFallbacks.markAssociationTerminal(association);
+      observedAttempts.delete(key);
       if (finalized === "already-finalized") {
         if (stagedEntries.length > 0) {
           const durableTurn = tracker.getTurnState(
@@ -1999,31 +2637,27 @@ export function createHookHandlers(deps: HookDeps) {
           );
           if (fallbacksAreDurable) {
             for (const [toolCallId] of stagedEntries) {
-              toolFallbacks.delete(toolCallId);
-              pendingToolCalls.delete(toolCallId);
-              recordedToolCalls.add(toolCallId);
+              rememberFlushedToolCall(toolCallId, association.sessionId);
             }
           }
         }
         return;
       }
       for (const [toolCallId] of stagedEntries) {
-        toolFallbacks.delete(toolCallId);
-        pendingToolCalls.delete(toolCallId);
-        recordedToolCalls.add(toolCallId);
+        rememberFlushedToolCall(toolCallId, association.sessionId);
       }
       await finalizeTrackedTurn(association, ctx, observePhase);
     } catch (error) {
       outcome = "failed";
       logger.warn(
-        `agent_end failed ${JSON.stringify({ ...diagnostic(), ...safeErrorClassification(error) })}`,
+        `agent_lifecycle failed ${JSON.stringify({ ...diagnostic(), ...safeErrorClassification(error) })}`,
       );
       throw error;
     } finally {
       clearTimeout(slowTimer);
       if (slow) {
         logger.info(
-          `agent_end settled after slow warning ${JSON.stringify({ ...diagnostic(), outcome })}`,
+          `agent_lifecycle settled after slow warning ${JSON.stringify({ ...diagnostic(), outcome })}`,
         );
       }
     }
@@ -2040,7 +2674,21 @@ export function createHookHandlers(deps: HookDeps) {
       sessionId: event.sessionId ?? ctx.sessionId,
       sessionKey: ctx.sessionKey,
     });
-    if (!association) return;
+    if (association) await flushToolFallbacks(association);
+  }
+
+  function rememberFlushedToolCall(
+    toolCallId: string,
+    sessionId: string,
+  ): void {
+    toolFallbacks.delete(toolCallId);
+    pendingToolCalls.delete(toolCallId);
+    rememberToolCall(toolCallId, sessionId);
+  }
+
+  async function flushToolFallbacks(
+    association: TurnAssociation,
+  ): Promise<void> {
     const entries = toolFallbacks.listForAssociation(association);
     for (const [toolCallId, staged] of entries) {
       const merged = await tracker.mergeTurnAndPersist({
@@ -2053,77 +2701,7 @@ export function createHookHandlers(deps: HookDeps) {
         },
       });
       if (merged === "applied") {
-        toolFallbacks.delete(toolCallId);
-        pendingToolCalls.delete(toolCallId);
-        recordedToolCalls.add(toolCallId);
-      }
-    }
-    return;
-  }
-
-  async function onMessageSending(
-    event: PluginHookMessageSendingEvent,
-    ctx: PluginHookAgentContext,
-  ): Promise<void> {
-    logger.info(
-      `onMessageSending hook triggered ${JSON.stringify({
-        hasSessionId: Boolean(ctx.sessionId),
-        hasSessionKey: Boolean(ctx.sessionKey),
-        hasRunId: Boolean(ctx.runId),
-      })}`,
-    );
-    const association = resolveAssociatedTurn({
-      contextRunId: ctx.runId,
-      sessionId: ctx.sessionId,
-      sessionKey: ctx.sessionKey,
-    });
-    logger.info(
-      `onMessageSending association resolved ${JSON.stringify({
-        associationResolved: Boolean(association),
-      })}`,
-    );
-    if (!association) return;
-    const stagedEntries = toolFallbacks.listForAssociation(association);
-    const stagedToolFallbacks = stagedEntries.map(
-      ([, { fallback, skillUsed }]) =>
-        skillUsed ? { ...fallback, skillUsed } : fallback,
-    );
-    const messageContent = (event as { content?: unknown })?.content;
-    const resultText =
-      typeof messageContent === "string"
-        ? messageContent.trim()
-        : event !== undefined
-          ? resolveToolResultText(event)
-          : undefined;
-    const finalized = await tracker.finalizeTurnFromAgentEnd({
-      sessionId: association.sessionId,
-      expectedTurnKey: association.turnKey,
-      stagedToolFallbacks,
-      result: resultText || undefined,
-      endedAt: new Date().toISOString(),
-    });
-    logger.info(
-      `onMessageSending turn finalization result ${JSON.stringify({
-        finalizationStatus: finalized,
-      })}`,
-    );
-    if (
-      finalized === "applied" ||
-      finalized === "already-finalized" ||
-      finalized === "became-review-eligible"
-    ) {
-      promptExecutions.finalizeAssociation(association);
-      turnAssociations.markAssociationTerminal(association);
-      toolFallbacks.markAssociationTerminal(association);
-      for (const [toolCallId] of stagedEntries) {
-        toolFallbacks.delete(toolCallId);
-        pendingToolCalls.delete(toolCallId);
-        recordedToolCalls.add(toolCallId);
-      }
-      if (finalized !== "already-finalized") {
-        await finalizeTrackedTurn(association, ctx);
-      } else {
-        await recordAgentEndStats(association);
+        rememberFlushedToolCall(toolCallId, association.sessionId);
       }
     }
   }
@@ -2135,11 +2713,19 @@ export function createHookHandlers(deps: HookDeps) {
     promptExecutions.removeSession(ctx.sessionId);
     turnAssociations.removeSession(ctx.sessionId);
     toolFallbacks.removeSession(ctx.sessionId);
+    for (const [runId, pending] of pendingNativeRuns) {
+      if (pending.sessionId === ctx.sessionId) pendingNativeRuns.delete(runId);
+    }
+    for (const key of observedAttempts.keys()) {
+      if (key.startsWith(`${ctx.sessionId}\0`)) observedAttempts.delete(key);
+    }
     for (const [toolCallId, pending] of pendingToolCalls) {
       if (pending.association.sessionId === ctx.sessionId) {
         pendingToolCalls.delete(toolCallId);
-        recordedToolCalls.delete(toolCallId);
       }
+    }
+    for (const [toolCallId, sessionId] of recordedToolCalls) {
+      if (sessionId === ctx.sessionId) recordedToolCalls.delete(toolCallId);
     }
     tracker.cleanup(ctx.sessionId, {
       deleteFile: false,
@@ -2154,8 +2740,8 @@ export function createHookHandlers(deps: HookDeps) {
     onAfterToolCall,
     onToolResultPersist,
     onBeforeAgentFinalize,
-    onMessageSending,
     onAgentEnd,
+    onAgentLifecycleEvent,
     onSessionEnd,
     reviewScheduler,
   };

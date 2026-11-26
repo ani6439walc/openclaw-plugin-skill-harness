@@ -3,6 +3,41 @@ import { TurnAssociationRegistry } from "./turn-associations.js";
 
 describe("TurnAssociationRegistry", () => {
   describe("native correlation fences", () => {
+    it.each([
+      { recordedKey: undefined, expected: { sessionKey: "unrelated" } },
+      { recordedKey: "canonical", expected: {} },
+      {
+        recordedKey: "canonical",
+        expected: { sessionId: "session-a", sessionKey: "unrelated" },
+      },
+      {
+        recordedKey: "canonical",
+        expected: { sessionId: "other-session", sessionKey: "canonical" },
+      },
+    ])(
+      "keeps a pending fence bindable without a conflict-free identity match ($expected)",
+      ({ recordedKey, expected }) => {
+        const registry = new TurnAssociationRegistry();
+        const owner = {};
+        const association = {
+          sessionId: "session-a",
+          sessionKey: "canonical",
+          turnKey: "turn-a",
+        };
+        registry.claimNativeRun(
+          "run-a",
+          owner,
+          association.sessionId,
+          recordedKey,
+        );
+        registry.markRunSettled("run-a", expected);
+        expect(registry.hasActiveSession(association.sessionId)).toBe(true);
+        expect(registry.bindNativeRun("run-a", owner, association)).toBe(
+          "bound",
+        );
+      },
+    );
+
     it("keeps a pending normalized alias known until its owner binds it", () => {
       const registry = new TurnAssociationRegistry();
       const owner = {};
@@ -325,7 +360,7 @@ describe("TurnAssociationRegistry", () => {
     });
   });
 
-  it("resolves anonymous turns by session only while attribution is unique", () => {
+  it("supersedes the prior anonymous turn when a distinct turn binds", () => {
     const registry = new TurnAssociationRegistry();
     const first = registry.reserveAnonymous();
     expect(first.status).toBe("reserved");
@@ -347,7 +382,115 @@ describe("TurnAssociationRegistry", () => {
       sessionId: "session-a",
       turnKey: "turn-b",
     });
-    expect(registry.resolveSession("session-a")).toBeUndefined();
+    const current = { sessionId: "session-a", turnKey: "turn-b" };
+    expect(registry.resolveSession("session-a")).toEqual(current);
+    expect(registry.resolveAnonymousSession("session-a")).toBeUndefined();
+    registry.markAssociationTerminal({
+      sessionId: "session-a",
+      turnKey: "turn-a",
+    });
+    expect(registry.resolveAnonymousSession("session-a")).toEqual(current);
+  });
+
+  it("detects busy sessions with multiple active turns and pending native fences", () => {
+    const registry = new TurnAssociationRegistry();
+    const first = {
+      sessionId: "session-a",
+      sessionKey: "canonical",
+      turnKey: "one",
+    };
+    const second = { ...first, turnKey: "two" };
+    for (const turn of [first, second]) {
+      const owner = {};
+      registry.claimNativeRun(turn.turnKey, owner, turn.sessionId);
+      expect(registry.hasActiveSession(" session-a ")).toBe(true);
+      registry.bindNativeRun(turn.turnKey, owner, turn);
+    }
+    expect(registry.resolveSession("canonical")).toBeUndefined();
+    expect(registry.hasActiveSession("canonical")).toBe(true);
+    registry.markAssociationTerminal(first);
+    expect(registry.hasActiveSession("canonical")).toBe(true);
+    registry.markAssociationTerminal(second);
+    expect(registry.hasActiveSession("canonical")).toBe(false);
+    expect(registry.hasActiveSession("session-a")).toBe(false);
+  });
+
+  it.each(["active", "terminal"])(
+    "promotes a %s pinned alias using its original capacity",
+    (state) => {
+      const registry = new TurnAssociationRegistry({
+        maxEntries: 1,
+        maxNativeEntries: 1,
+      });
+      const turn = { sessionId: "session", turnKey: "turn" };
+      const owner = {};
+      expect(registry.pinAnonymousRun("pinned", turn)).toBe(true);
+      if (state === "terminal") registry.markTerminal("pinned", turn);
+
+      expect(
+        registry.claimNativeRun("pinned", owner, turn.sessionId, " key ", turn),
+      ).toBe("same-owner");
+      expect(registry.resolve("pinned")).toEqual(
+        state === "active" ? { ...turn, sessionKey: "key" } : undefined,
+      );
+      expect(registry.hasActiveSession("key")).toBe(state === "active");
+      expect(registry.claimNativeRun("another", {}, "another-session")).toBe(
+        "claimed",
+      );
+      expect(registry.reserve("legacy").status).toBe("full");
+    },
+  );
+
+  it("clears activity on native collisions and fences exact settled runs from rebinding", () => {
+    const registry = new TurnAssociationRegistry();
+    const owner = {};
+    const turn = {
+      sessionId: "session",
+      sessionKey: "canonical",
+      turnKey: "one",
+    };
+    registry.claimNativeRun("settled", owner, turn.sessionId, turn.sessionKey);
+    registry.claimNativeRun(
+      "collision",
+      owner,
+      turn.sessionId,
+      turn.sessionKey,
+    );
+    registry.markRunSettled("unknown", turn);
+    expect(registry.hasRun("unknown")).toBe(false);
+    registry.markRunSettled(" settled ", turn);
+    expect(registry.hasRun("settled")).toBe(true);
+    expect(registry.bindNativeRun("settled", owner, turn)).toBe("stale");
+    expect(registry.hasActiveSession(turn.sessionKey)).toBe(true);
+
+    expect(registry.claimNativeRun("collision", {}, "other")).toBe("blocked");
+    expect(registry.hasActiveSession(turn.sessionId)).toBe(false);
+    expect(registry.hasActiveSession(turn.sessionKey)).toBe(false);
+    expect(registry.hasRun("collision")).toBe(true);
+    expect(registry.bindNativeRun("collision", owner, turn)).toBe("ambiguous");
+  });
+
+  it("keeps unfinished anonymous predecessors through TTL and capacity pressure", () => {
+    let now = 0;
+    const registry = new TurnAssociationRegistry({
+      maxEntries: 2,
+      idleTtlMs: 10,
+      now: () => now,
+    });
+    const first = { sessionId: "session-a", turnKey: "one" };
+    for (const turnKey of ["one", "two"]) {
+      const reservation = registry.reserveAnonymous();
+      if (reservation.status !== "reserved")
+        throw new Error("expected reservation");
+      registry.bindAnonymous(reservation.token, { ...first, turnKey });
+    }
+    now = 100;
+    expect(registry.reserve("extra")).toEqual({ status: "full" });
+    expect(registry.resolveAnonymousSession(first.sessionId)).toBeUndefined();
+    registry.markAssociationTerminal(first);
+    expect(registry.reserve("extra").status).toBe("reserved");
+    registry.removeSession(first.sessionId);
+    expect(registry.resolveSession(first.sessionId)).toBeUndefined();
   });
 
   it("resolves a unique live turn by canonical session key", () => {

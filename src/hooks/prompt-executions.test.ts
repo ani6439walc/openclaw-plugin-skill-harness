@@ -146,7 +146,7 @@ describe("PromptExecutions request ownership", () => {
     },
   );
 
-  it("allows finalized native handles only for static rebuild ownership checks", async () => {
+  it("returns finalized native identity for rebuilds without rerunning preparation or selection", async () => {
     const executions = create();
     const request = executions.claimRequest({ ...scope, admissionId: "a" })!;
     await executions.runRequest(request, association, async () => "selected");
@@ -157,7 +157,12 @@ describe("PromptExecutions request ownership", () => {
     expect(() => executions.assertRequestCurrent(request, true)).not.toThrow();
     expect(() => executions.assertRequestCurrent(request)).toThrow();
     const operation = vi.fn(async () => association);
-    expect(() => executions.prepareRequest(request, operation)).toThrow();
+    await expect(
+      executions.prepareRequest(request, operation),
+    ).resolves.toEqual({
+      ...association,
+      finalized: true,
+    });
     expect(() =>
       executions.runRequest(request, association, async () => "retry"),
     ).toThrow();

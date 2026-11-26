@@ -8,6 +8,8 @@ import pluginEntry from "../index.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import * as skills from "./skills/index.js";
 import * as skillRoots from "./skills/roots.js";
+import * as reviewScheduling from "./review/scheduler.js";
+import type { ReviewCandidate } from "./review/scheduler.js";
 import {
   createWorkingSetSkillsResolver,
   createPlugin,
@@ -169,7 +171,7 @@ describe("createPlugin", () => {
     } as Partial<OpenClawPluginApi>);
 
     expect(() => createPlugin(api).register(api)).not.toThrow();
-    expect(api.on).toHaveBeenCalledTimes(9);
+    expect(api.on).toHaveBeenCalledTimes(8);
     expect(api.on).toHaveBeenCalledWith(
       "before_prompt_build",
       expect.any(Function),
@@ -192,7 +194,7 @@ describe("createPlugin", () => {
       lifecycle: { onDispose, registerRuntimeLifecycle: vi.fn() },
     });
     pluginEntry.register!(api);
-    expect(api.on).toHaveBeenCalledTimes(9);
+    expect(api.on).toHaveBeenCalledTimes(8);
     expect(
       api.registerTool.mock.calls.map(([, options]) => options.name),
     ).toEqual(["skill_list", "skill_search", "skill_view"]);
@@ -562,10 +564,128 @@ describe("createPlugin", () => {
       "before_agent_finalize",
       expect.any(Function),
     );
-    expect(api.on).toHaveBeenCalledWith(
+    expect(api.on).not.toHaveBeenCalledWith(
       "message_sending",
       expect.any(Function),
     );
+    expect(api.on).toHaveBeenCalledWith("agent_end", expect.any(Function));
+  });
+
+  it("defers Review for multiple active admissions and pending session-ID fences", () => {
+    const createScheduler = vi.spyOn(
+      reviewScheduling,
+      "createIntentReviewScheduler",
+    );
+    const api = createApi();
+    createPlugin(api).register(api);
+    const { turnAssociations } = createHookHandlersSpy.mock.calls[0][0];
+    const isSystemActive = createScheduler.mock.calls[0][0]!.isSystemActive!;
+    const sessionId = "busy-session";
+    const sessionKey = "agent:main:main";
+    const sparse = { ctx: {}, snapshot: { sessionId } } as ReviewCandidate;
+    const canonical = { ...sparse, sessionKey };
+    const turns = ["older-replay", "current"].map((turnKey) => ({
+      turnKey,
+      sessionId,
+      sessionKey,
+    }));
+    for (const turn of turns) {
+      const owner = {};
+      turnAssociations.claimNativeRun(turn.turnKey, owner, sessionId);
+      expect(isSystemActive(sparse)).toBe(true);
+      expect(isSystemActive(canonical)).toBe(true);
+      turnAssociations.bindNativeRun(turn.turnKey, owner, turn);
+    }
+    expect(turnAssociations.resolveSession(sessionKey)).toBeUndefined();
+    expect(isSystemActive(canonical)).toBe(true);
+    expect(isSystemActive(sparse)).toBe(true);
+    turnAssociations.markAssociationTerminal(turns[0]);
+    expect(isSystemActive(sparse)).toBe(true);
+    turnAssociations.markAssociationTerminal(turns[1]);
+    expect(isSystemActive(sparse)).toBe(false);
+    expect(isSystemActive(canonical)).toBe(false);
+  });
+
+  it("shares prompt turn activity with Review until settled lifecycle, including tools after an outbound preamble", async () => {
+    const createScheduler = vi.spyOn(
+      reviewScheduling,
+      "createIntentReviewScheduler",
+    );
+    const registerAgentEventSubscription = vi.fn();
+    const api = createApi({
+      agent: {
+        events: { registerAgentEventSubscription },
+      } as OpenClawPluginApi["agent"],
+      pluginConfig: { routing: { skills: { maxInjectedSkills: 0 } } },
+    });
+    createPlugin(api).register(api);
+    expect(registerAgentEventSubscription).toHaveBeenCalledExactlyOnceWith({
+      id: "skill-harness:lifecycle",
+      streams: ["lifecycle"],
+      phases: ["end", "error"],
+      handle: expect.any(Function),
+    });
+    const isSystemActive = createScheduler.mock.calls[0][0]?.isSystemActive;
+    expect(isSystemActive).toBeTypeOf("function");
+    const deps = createHookHandlersSpy.mock.calls[0][0];
+    const hook = (name: string) =>
+      api.on.mock.calls.find(([event]) => event === name)?.[1];
+    const ctx = {
+      agentId: "main",
+      runId: "preamble-run",
+      sessionId: "preamble-session",
+      sessionKey: "agent:main:main",
+      messageProvider: "webchat",
+      trigger: "user",
+    };
+    const candidate = {
+      sessionKey: "",
+      ctx: { sessionKey: " " },
+      snapshot: { sessionId: ctx.sessionId, sessionKey: ctx.sessionKey },
+    } as ReviewCandidate;
+    expect(isSystemActive!(candidate)).toBe(false);
+    await hook("before_prompt_build")(
+      { prompt: "Check my tools", messages: [] },
+      ctx,
+    );
+    expect(isSystemActive!(candidate)).toBe(true);
+    await hook("message_sending")?.({ content: "Checking the inputs." }, ctx);
+    expect(
+      deps.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+    ).toBeUndefined();
+    await hook("after_tool_call")(
+      {
+        toolName: "skill_view",
+        params: { name: "fixture" },
+        result: JSON.stringify({
+          success: true,
+          name: "fixture",
+          path: "/skills/fixture/SKILL.md",
+          content: "Instructions",
+        }),
+      },
+      ctx,
+    );
+    expect(deps.tracker.getCurrentState(ctx.sessionId)?.skillsUsed).toEqual([
+      { name: "fixture", path: "/skills/fixture/SKILL.md" },
+    ]);
+    expect(isSystemActive!(candidate)).toBe(true);
+    await hook("agent_end")(
+      { messages: [{ role: "assistant", content: "Done." }], success: true },
+      ctx,
+    );
+    expect(isSystemActive!(candidate)).toBe(true);
+    await registerAgentEventSubscription.mock.calls[0][0].handle({
+      ...ctx,
+      stream: "lifecycle",
+      seq: 1,
+      ts: Date.now(),
+      data: { phase: "end", executionSettled: true },
+    });
+    expect(
+      deps.tracker.getCurrentState(ctx.sessionId)?.timestamps?.end,
+    ).toBeTruthy();
+    expect(isSystemActive!(candidate)).toBe(false);
   });
 
   it("registers skill tools without legacy review command surfaces", () => {

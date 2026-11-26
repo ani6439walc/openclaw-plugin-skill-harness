@@ -13,7 +13,11 @@ import { canonicalIdentity } from "./normalize.js";
 import { SessionTracker } from "./session/index.js";
 import { StatsAggregator } from "./stats/index.js";
 import { IntentReviewLogWriter } from "./review/log-writer.js";
-import { createIntentReviewScheduler } from "./review/scheduler.js";
+import {
+  createIntentReviewScheduler,
+  isReviewSessionActive,
+} from "./review/scheduler.js";
+import { TurnAssociationRegistry } from "./hooks/turn-associations.js";
 import { createReviewToolRegistry } from "./review/tool-bindings.js";
 import { createBackgroundRunner } from "./subagent-runtime.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
@@ -293,7 +297,10 @@ export function createPlugin(
         refreshTimer.unref();
       };
 
+      const turnAssociations = new TurnAssociationRegistry();
       const reviewScheduler = createIntentReviewScheduler({
+        isSystemActive: (candidate) =>
+          isReviewSessionActive(turnAssociations, candidate),
         signal: api.lifecycle?.signal,
         runInBackgroundContext,
       });
@@ -344,9 +351,9 @@ export function createPlugin(
         reviewLogWriter,
         reviewToolRegistry,
         reviewScheduler,
+        turnAssociations,
         getWorkingSetSkills,
         qmdSkillIndex,
-
         nativeBundledSkillsDir,
         getSharedRoots: () => config.skills.sharedRoots,
         dataRoot,
@@ -369,8 +376,13 @@ export function createPlugin(
       api.on("after_tool_call", handlers.onAfterToolCall);
       api.on("tool_result_persist", handlers.onToolResultPersist);
       api.on("before_agent_finalize", handlers.onBeforeAgentFinalize);
-      api.on("message_sending", handlers.onMessageSending);
       api.on("agent_end", handlers.onAgentEnd);
+      api.agent?.events?.registerAgentEventSubscription?.({
+        id: "skill-harness:lifecycle",
+        streams: ["lifecycle"],
+        phases: ["end", "error"],
+        handle: handlers.onAgentLifecycleEvent,
+      });
       api.on("session_end", handlers.onSessionEnd);
       api.on("gateway_stop", stopBackgroundWork);
       registerSkillTools(api, {
