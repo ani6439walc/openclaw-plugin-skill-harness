@@ -142,9 +142,14 @@ The parent stages confined full `SKILL.md` snapshots (256 KiB per file, 2 MiB
 total). Relation proposals must cite exact line ranges/quotes from both endpoints,
 touch an original seed and stay inside the parent-admitted manifest. Skill content can
 justify changes without an execution trial; recommendation/search scores or
-co-loading alone cannot. Require explicit necessity for `depends_on`; deletion
-requires contradiction, duplication or supersession, not lack of usage or search
-hits. Do not introduce confidence levels or restore verification-status fields.
+co-loading alone cannot. Prefer specific documented types (`depends_on`,
+`composes_with`, `specializes`, `conflicts_with`, `similar_to`) over generic
+`related`, treat `related` as a last resort, and upgrade overly broad existing
+`related` edges when both endpoints support a narrower predicate. Require
+explicit necessity for `depends_on` (do not stretch `composes_with` into
+`depends_on`); deletion requires contradiction, duplication or supersession,
+not lack of usage or search hits. Do not introduce confidence levels or restore
+verification-status fields.
 
 Prepare at most four existing-neighbor attempts, rotating a sorted neighbor list with a persisted cursor keyed by the captured seed-ID group. Keep at most 256 cursor entries in `review.json`; advance only in the same locked atomic write as a new event. This rotates preparation, not proven model attention, and does not guarantee coverage when groups or catalogs change. Do not derive cursors from unbounded event history.
 
