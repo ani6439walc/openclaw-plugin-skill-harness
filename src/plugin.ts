@@ -22,6 +22,7 @@ import { createReviewToolRegistry } from "./review/tool-bindings.js";
 import { createBackgroundRunner } from "./subagent-runtime.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { listAvailableSkills, registerSkillTools } from "./skills/index.js";
+import { ensureKnownRelationSources } from "./skills/relation-sources.js";
 import {
   resolveOpenClawBundledSkillsDir,
   resolveSkillRoots,
@@ -247,14 +248,33 @@ export function createPlugin(
               activeAgentIds()?.includes(normalizedAgentId) === false
             )
               return;
+            const skillRoots = resolveSkillRoots({
+              api: runtimeConfigApi,
+              agentId: normalizedAgentId,
+              nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
+              sharedRoots: config.skills.sharedRoots,
+            });
+            if (skills.length > 0 && skillRoots.length > 0) {
+              await ensureKnownRelationSources({
+                dataRoot,
+                skills,
+                roots: skillRoots,
+                signal: api.lifecycle?.signal,
+              }).catch((error: unknown) => {
+                if (!disposed) {
+                  logger.warn(
+                    formatErrorDiagnostic(
+                      "failed to auto-register relation sources",
+                      error,
+                    ),
+                  );
+                }
+              });
+              if (disposed) return;
+            }
             qmdSkillIndex.schedule(normalizedAgentId, {
               skills,
-              sourceRoots: resolveSkillRoots({
-                api: runtimeConfigApi,
-                agentId: normalizedAgentId,
-                nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
-                sharedRoots: config.skills.sharedRoots,
-              }).map((root) => root.path),
+              sourceRoots: skillRoots.map((root) => root.path),
             });
           } catch (error: unknown) {
             logger.warn(

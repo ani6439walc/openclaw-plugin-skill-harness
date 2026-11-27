@@ -616,3 +616,51 @@ it("advances past failed existing-neighbor captures on the next inspection", asy
     false,
   );
 });
+
+it("auto-registers unregistered seeds and discovered skills inside knownRoots while rejecting unknown roots", async () => {
+  const knownRoot = path.join(root, "workspace-skills");
+  const unknownRoot = path.join(root, "unknown-skills");
+  const makeSkill = async (dir: string, name: string) => {
+    const location = path.join(dir, name, "SKILL.md");
+    await fs.mkdir(path.dirname(location), { recursive: true });
+    await fs.writeFile(
+      location,
+      `---\nname: ${name}\ndescription: Workflow ${name}.\n---\n${name} provides pipeline data.\n`,
+    );
+    return { name, location, description: `Workflow ${name}.` };
+  };
+  const seed = await makeSkill(knownRoot, "seed-skill");
+  const discovered = await makeSkill(knownRoot, "discovered-skill");
+  const rogue = await makeSkill(unknownRoot, "rogue-skill");
+  const visible = [seed, discovered, rogue];
+
+  // No sources.json exists initially; knownRoots lets Review auto-register seeds and extras.
+  const context = await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: [seed.name],
+    getVisibleSkills: async () => visible,
+    knownRoots: [{ path: knownRoot, source: "workspace" }],
+  });
+  expect(context).toBeDefined();
+  expect(context!.skills).toHaveLength(1);
+  expect(context!.skills[0].identity.id).toMatch(
+    /^local:[a-f0-9-]{36}:seed-skill$/,
+  );
+
+  const admitted = await context!.admitSkill(discovered.name);
+  expect(admitted.status).toBe("eligible");
+  expect(await context!.admitSkill(rogue.name)).toEqual({
+    status: "ineligible",
+    reason: "unregistered",
+  });
+
+  // Auto-registered endpoints can publish verified relations to graph.jsonl.
+  const receipt = await applyPreparedRelationReview(
+    context!,
+    [finding(context!)],
+    "auto-reg-event",
+    "main",
+  );
+  expect(receipt.changed).toBe(1);
+  expect((await readRelationGraph(root))!.relations).toHaveLength(1);
+});

@@ -153,7 +153,7 @@ verification-status fields.
 
 Prepare at most four existing-neighbor attempts, rotating a sorted neighbor list with a persisted cursor keyed by the captured seed-ID group. Keep at most 256 cursor entries in `review.json`; advance only in the same locked atomic write as a new event. This rotates preparation, not proven model attention, and does not guarantee coverage when groups or catalogs change. Do not derive cursors from unbounded event history.
 
-Discovery belongs to the reviewer: at most four `skill_search` calls per run, then `skill_view` admits chosen visible registered endpoints under the shared eight-extra-attempt budget. Preserve failed-attempt accounting, repeated-read snapshot identity, and 256 KiB/file plus 2 MiB aggregate evidence limits. Admission must serialize, check cancellation around I/O, and capture new pair revisions without refreshing previously observed pairs. Support files and ineligible reads are not relation evidence; no automatic source registration occurs.
+Discovery belongs to the reviewer: at most four `skill_search` calls per run, then `skill_view` admits chosen visible registered endpoints under the shared eight-extra-attempt budget. Preserve failed-attempt accounting, repeated-read snapshot identity, and 256 KiB/file plus 2 MiB aggregate evidence limits. Admission must serialize, check cancellation around I/O, and capture new pair revisions without refreshing previously observed pairs. Support files and ineligible reads are not relation evidence; unregistered skills inside the agent's known OpenClaw skill roots (`resolveSkillRoots`) are auto-registered into `sources.json`, while skills outside known roots remain ineligible without allocating identities.
 
 Use public run `toolBindings` with only a structured-cloneable descriptor (version, random token, and exact agent/session identity). The host clones and fingerprints these values: never transport callback functions. Keep callbacks in a registry owned by one plugin registration and inject that same registry through hooks/runner and registered tools. Validate descriptor ownership and registry membership; reject unknown, cross-registration or closed bindings without a normal-tool fallback. Keep lifetime authority in the origin closure and close the registry during plugin disposal. Close admission and drain accepted work before validation or workspace cleanup. Review `skill_view` bypasses usage writes and marks results `review_inspection`; adoption extraction rejects that marker. Normal tool behavior remains unchanged. Do not depend on tool hooks receiving `toolBindings`.
 
@@ -257,8 +257,15 @@ merged by name, matching contents or a guessed Git origin.
 
 The private `skill-relations/sources.json` registry owns source-root bindings
 and each immutable key's current name and relative `source_path` under that
-registered root. Readers do
-not create UUIDs, bindings or sidecars. Registration, explicit rebind/rename,
+registered root. Pure readers (`readRelationSources`, `resolveRelationSource`) do
+not create UUIDs, bindings or sidecars. Full-registration skill refreshes and
+Review preparation/admission with resolved known OpenClaw skill roots
+(`resolveSkillRoots`) may auto-register unregistered valid skills under those
+known roots via `ensureKnownRelationSources`, reusing each root's existing
+`local:<UUID>` (or allocating one per root), never duplicating already-bound
+physical files (such as `github:*` bindings or symlink aliases), never
+overwriting/renaming/removing existing bindings, and failing closed on corrupt
+or symlinked registries. Registration, explicit rebind/rename,
 and graph publication share the graph lock; missing, invalid or ambiguous
 bindings fail open without borrowing another source's relations. Only current
 visible winning skills may resolve graph endpoints. Back up the registry with
