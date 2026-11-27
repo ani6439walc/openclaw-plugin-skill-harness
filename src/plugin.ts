@@ -156,6 +156,7 @@ export function createPlugin(
       const ownsBackgroundWork =
         api.registrationMode === undefined || api.registrationMode === "full";
       let disposed = false;
+      const backgroundAbortController = new AbortController();
       let refreshTimer: ReturnType<typeof setTimeout> | undefined;
       const runInBackgroundContext = createBackgroundRunner(api.lifecycle);
       const backgroundWork = new Set<Promise<void>>();
@@ -259,9 +260,9 @@ export function createPlugin(
                 dataRoot,
                 skills,
                 roots: skillRoots,
-                signal: api.lifecycle?.signal,
+                signal: backgroundAbortController.signal,
               }).catch((error: unknown) => {
-                if (!disposed) {
+                if (!disposed && !backgroundAbortController.signal.aborted) {
                   logger.warn(
                     formatErrorDiagnostic(
                       "failed to auto-register relation sources",
@@ -270,7 +271,7 @@ export function createPlugin(
                   );
                 }
               });
-              if (disposed) return;
+              if (disposed || backgroundAbortController.signal.aborted) return;
             }
             qmdSkillIndex.schedule(normalizedAgentId, {
               skills,
@@ -329,6 +330,13 @@ export function createPlugin(
       const stopBackgroundWork = (): Promise<void> => {
         if (stopping) return stopping;
         disposed = true;
+        if (!backgroundAbortController.signal.aborted) {
+          backgroundAbortController.abort(
+            api.lifecycle?.signal?.aborted
+              ? api.lifecycle.signal.reason
+              : undefined,
+          );
+        }
         api.lifecycle?.signal?.removeEventListener("abort", onLifecycleAbort);
         if (refreshTimer !== undefined) {
           clearTimeout(refreshTimer);

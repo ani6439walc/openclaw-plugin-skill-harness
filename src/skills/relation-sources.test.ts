@@ -1,8 +1,12 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { vi } from "vitest";
 import {
   ensureKnownRelationSources,
+  inspectRelationSources,
   readRelationSources,
   registerRelationSource,
   relationSourcesPath,
@@ -538,25 +542,288 @@ it("serializes concurrent auto-registration and refuses corrupt or symlinked reg
   const registry = readRelationSources(root)!;
   expect(registry.sources).toHaveLength(1);
   expect(Object.keys(registry.sources[0].skills).sort()).toEqual(["a", "b"]);
+  expect((await fs.stat(relationSourcesPath(root))).mode & 0o777).toBe(0o600);
 
   const file = relationSourcesPath(root);
   await fs.writeFile(file, "corrupt");
   const c = await skill(path.join(collection, "c"), "c");
+  expect(await inspectRelationSources(root)).toEqual({
+    status: "invalid",
+    reason: "invalid-registry",
+  });
   expect(
     await ensureKnownRelationSources({ dataRoot: root, skills: [c], roots }),
   ).toBeUndefined();
   expect(await fs.readFile(file, "utf8")).toBe("corrupt");
 
-  // No skill-relations directory is created when every skill is outside known roots.
-  const cleanDataRoot = path.join(root, "clean-data");
-  await fs.mkdir(cleanDataRoot, { recursive: true });
-  const rogue = await skill(path.join(root, "rogue-root", "rogue"), "rogue");
+  // Symlinked sources.json must also be refused without touching its target.
+  await fs.unlink(file);
+  const externalFile = path.join(root, "external-sources.json");
+  const externalRaw = JSON.stringify({ version: 1, sources: [] });
+  await fs.writeFile(externalFile, externalRaw);
+  await fs.symlink(externalFile, file);
+  expect(await inspectRelationSources(root)).toEqual({
+    status: "invalid",
+    reason: "invalid-registry",
+  });
+  expect(
+    await ensureKnownRelationSources({ dataRoot: root, skills: [c], roots }),
+  ).toBeUndefined();
+  expect(await fs.readFile(externalFile, "utf8")).toBe(externalRaw);
+
+  // Symlinked skill-relations directory must be refused without touching its target.
+  const symlinkDataRoot = path.join(root, "symlink-dir-data");
+  const externalDir = path.join(root, "external-dir");
+  await fs.mkdir(symlinkDataRoot, { recursive: true });
+  await fs.mkdir(externalDir, { recursive: true });
+  await fs.symlink(externalDir, path.join(symlinkDataRoot, "skill-relations"));
+  expect(await inspectRelationSources(symlinkDataRoot)).toEqual({
+    status: "invalid",
+    reason: "invalid-directory",
+  });
   expect(
     await ensureKnownRelationSources({
-      dataRoot: cleanDataRoot,
-      skills: [rogue],
+      dataRoot: symlinkDataRoot,
+      skills: [c],
       roots,
     }),
-  ).toEqual({ registeredCount: 0, createdSourceIds: [] });
-  expect(await fs.readdir(cleanDataRoot)).toEqual([]);
+  ).toBeUndefined();
+  expect(await fs.readdir(externalDir)).toEqual([]);
+});
+
+it("refuses to mint new local UUIDs when sources.json is missing alongside an existing stable-ID graph", async () => {
+  const collection = path.join(root, "collection");
+  const sample = await skill(path.join(collection, "sample"), "sample");
+  const roots = [{ path: collection, source: "workspace" as const }];
+
+  for (const [label, graphContent] of [
+    [
+      "local-v2-node",
+      `${JSON.stringify({
+        op: "create",
+        entity: {
+          id: "local:11111111-1111-4111-8111-111111111111:sample",
+          type: "Skill",
+          properties: {
+            name: "sample",
+            source_id: "local:11111111-1111-4111-8111-111111111111",
+            skill_key: "sample",
+            source_path: "sample/SKILL.md",
+            formatVersion: 2,
+          },
+        },
+      })}\n`,
+    ],
+    [
+      "github-v2-relation",
+      `${JSON.stringify({
+        op: "relate",
+        from: "github:owner/repo:a",
+        rel: "composes_with",
+        to: "github:owner/repo:b",
+        properties: { reason: "Pipeline", formatVersion: 2 },
+      })}\n`,
+    ],
+    ["corrupt-graph", "{not-json\n"],
+  ] as const) {
+    const partialDataRoot = path.join(root, `partial-${label}`);
+    const graphPath = path.join(
+      partialDataRoot,
+      "skill-relations",
+      "graph.jsonl",
+    );
+    await fs.mkdir(path.dirname(graphPath), { recursive: true });
+    await fs.writeFile(graphPath, graphContent);
+
+    expect(await inspectRelationSources(partialDataRoot)).toEqual({
+      status: "invalid",
+      reason: "missing-with-existing-graph",
+    });
+    expect(
+      await ensureKnownRelationSources({
+        dataRoot: partialDataRoot,
+        skills: [sample],
+        roots,
+      }),
+    ).toBeUndefined();
+    await expect(
+      fs.stat(relationSourcesPath(partialDataRoot)),
+    ).rejects.toThrow();
+  }
+});
+
+it("validates eligibility and inert YAML before acquiring the lock so ineligible skills create no directory", async () => {
+  const collection = path.join(root, "collection");
+  const roots = [{ path: collection, source: "workspace" as const }];
+  const sentinelKey = "__skillHarnessAutoRegJsSentinel__";
+  const globals = globalThis as Record<string, unknown>;
+  delete globals[sentinelKey];
+
+  const missingName = path.join(collection, "no-name", "SKILL.md");
+  await fs.mkdir(path.dirname(missingName), { recursive: true });
+  await fs.writeFile(missingName, "Plain markdown without frontmatter\n");
+
+  const mismatchedName = path.join(collection, "mismatch", "SKILL.md");
+  await fs.mkdir(path.dirname(mismatchedName), { recursive: true });
+  await fs.writeFile(
+    mismatchedName,
+    "---\nname: other-name\n---\nMismatched frontmatter\n",
+  );
+
+  const jsFrontmatter = path.join(collection, "js-skill", "SKILL.md");
+  await fs.mkdir(path.dirname(jsFrontmatter), { recursive: true });
+  await fs.writeFile(
+    jsFrontmatter,
+    `---js\n(() => { globalThis.${sentinelKey} = true; return { name: "js-skill" }; })()\n---\nBody\n`,
+  );
+
+  const rogue = await skill(path.join(root, "rogue-root", "rogue"), "rogue");
+  const cleanDataRoot = path.join(root, "clean-data");
+  await fs.mkdir(cleanDataRoot, { recursive: true });
+
+  try {
+    expect(
+      await ensureKnownRelationSources({
+        dataRoot: cleanDataRoot,
+        skills: [
+          rogue,
+          { name: "no-name", location: missingName },
+          { name: "mismatch", location: mismatchedName },
+          { name: "js-skill", location: jsFrontmatter },
+        ],
+        roots,
+      }),
+    ).toEqual({ registeredCount: 0, createdSourceIds: [] });
+    expect(globals[sentinelKey]).toBeUndefined();
+    expect(await fs.readdir(cleanDataRoot)).toEqual([]);
+  } finally {
+    delete globals[sentinelKey];
+  }
+});
+
+it("honors cancellation right before synchronous publication without writing sources.json", async () => {
+  const collection = path.join(root, "collection");
+  const sample = await skill(path.join(collection, "sample"), "sample");
+  const roots = [{ path: collection, source: "workspace" as const }];
+  const cancelDataRoot = path.join(root, "cancel-data");
+  await fs.mkdir(cancelDataRoot, { recursive: true });
+
+  const controller = new AbortController();
+  const realReadFile = fs.readFile.bind(fs);
+  let reads = 0;
+  const readSpy = vi
+    .spyOn(fs, "readFile")
+    .mockImplementation(async (...args: Parameters<typeof fs.readFile>) => {
+      const result = await realReadFile(...args);
+      if (String(args[0]).endsWith("SKILL.md")) {
+        reads += 1;
+        // Abort after the under-lock read completes, right before publication.
+        if (reads === 2) controller.abort();
+      }
+      return result;
+    });
+
+  try {
+    await expect(
+      ensureKnownRelationSources({
+        dataRoot: cancelDataRoot,
+        skills: [sample],
+        roots,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
+    await expect(
+      fs.stat(relationSourcesPath(cancelDataRoot)),
+    ).rejects.toThrow();
+  } finally {
+    readSpy.mockRestore();
+  }
+});
+
+it("coordinates with another process sharing the graph.jsonl lock without losing bindings", async () => {
+  const collection = path.join(root, "collection");
+  const realCollection = await fs.realpath(
+    await fs.mkdir(collection, { recursive: true }).then(() => collection),
+  );
+  const a = await skill(path.join(collection, "a"), "a");
+  const b = await skill(path.join(collection, "b"), "b");
+  const roots = [{ path: collection, source: "workspace" as const }];
+  const relDir = path.join(root, "skill-relations");
+  await fs.mkdir(relDir, { recursive: true, mode: 0o700 });
+  const lockPath = path.join(relDir, "graph.jsonl.lock");
+  const sourcesFile = relationSourcesPath(root);
+  const sharedLocalId = "local:11111111-1111-4111-8111-111111111111";
+
+  const child = spawn(
+    process.execPath,
+    [
+      "--eval",
+      `
+      const fs = require("node:fs");
+      const [lock, target, id, rootDir] = process.argv.slice(1);
+      fs.mkdirSync(lock);
+      fs.writeFileSync(lock + "/owner.json", JSON.stringify({ pid: process.pid, createdAtMs: Date.now() }));
+      process.on("message", () => {
+        const registry = {
+          version: 1,
+          sources: [{
+            id,
+            root: rootDir,
+            label: "peer-process",
+            skills: { a: { name: "a", source_path: "a/SKILL.md" } }
+          }]
+        };
+        const tmp = target + ".peer.tmp";
+        fs.writeFileSync(tmp, JSON.stringify(registry, null, 2), { mode: 0o600 });
+        fs.chmodSync(tmp, 0o600);
+        fs.renameSync(tmp, target);
+        fs.rmSync(lock, { recursive: true, force: true });
+        process.exit(0);
+      });
+      process.send("ready");
+      `,
+      lockPath,
+      sourcesFile,
+      sharedLocalId,
+      realCollection,
+    ],
+    { stdio: ["ignore", "ignore", "inherit", "ipc"] },
+  );
+  const exited = once(child, "exit");
+
+  try {
+    await once(child, "message");
+    let finished = false;
+    const pending = ensureKnownRelationSources({
+      dataRoot: root,
+      skills: [b],
+      roots,
+    }).then((result) => {
+      finished = true;
+      return result;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(finished).toBe(false);
+    await expect(fs.stat(sourcesFile)).rejects.toThrow();
+
+    child.send("publish");
+    expect((await exited)[0]).toBe(0);
+
+    const result = await pending;
+    expect(result).toEqual({ registeredCount: 1, createdSourceIds: [] });
+    const registry = readRelationSources(root)!;
+    expect(registry.sources).toHaveLength(1);
+    expect(registry.sources[0].id).toBe(sharedLocalId);
+    expect(Object.keys(registry.sources[0].skills).sort()).toEqual(["a", "b"]);
+    expect((await resolveRelationSource(a, registry))?.id).toBe(
+      `${sharedLocalId}:a`,
+    );
+    expect((await resolveRelationSource(b, registry))?.id).toBe(
+      `${sharedLocalId}:b`,
+    );
+  } finally {
+    if (child.exitCode === null) child.kill();
+    await exited;
+  }
 });

@@ -16,6 +16,11 @@ import {
   extractConfiguredAgentIds,
   initializePluginDataRoot,
 } from "./plugin.js";
+import { FileLock } from "./file-utils.js";
+import {
+  readRelationSources,
+  relationSourcesPath,
+} from "./skills/relation-sources.js";
 
 function parseLogReceipt(receipt: readonly unknown[] | undefined): unknown[] {
   expect(receipt).toHaveLength(1);
@@ -1473,5 +1478,87 @@ describe("createPlugin", () => {
     );
     expect(resolvedConfig.qmd.expansion.model).toBe("gpt-4o-mini");
     expect(resolvedConfig.qmd.expansion.apiKey).toBe("bifrost-secret-token");
+  });
+
+  it("auto-registers nonempty catalogs only during full registration, never in read-only discovery modes", async () => {
+    const skillDir = path.join(stateDir, "skills", "catalog-skill");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: catalog-skill\ndescription: Catalog fixture.\n---\nInstructions.\n",
+    );
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+
+    for (const registrationMode of [
+      "cli-metadata",
+      "discovery",
+      "tool-discovery",
+    ] as const) {
+      const api = createApi({
+        registrationMode,
+        pluginConfig: { qmd: { indexRefreshIntervalSeconds: 0 } },
+      });
+      createPlugin(api).register(api);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(fs.existsSync(path.join(dataRoot, "skill-relations"))).toBe(false);
+    expect(readRelationSources(dataRoot)).toBeUndefined();
+
+    const fullApi = createApi({
+      registrationMode: "full",
+      pluginConfig: { qmd: { indexRefreshIntervalSeconds: 0 } },
+    });
+    createPlugin(fullApi).register(fullApi);
+
+    await vi.waitFor(() => {
+      const registry = readRelationSources(dataRoot);
+      expect(registry).toBeDefined();
+      expect(
+        registry!.sources.some(
+          (source) =>
+            source.id.startsWith("local:") &&
+            Object.values(source.skills).some(
+              (binding) => binding.name === "catalog-skill",
+            ),
+        ),
+      ).toBe(true);
+    });
+    expect(fs.statSync(relationSourcesPath(dataRoot)).mode & 0o777).toBe(0o600);
+  });
+
+  it("aborts in-flight relation source auto-registration on gateway_stop via its stop-owned signal", async () => {
+    const skillDir = path.join(stateDir, "skills", "stop-skill");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: stop-skill\ndescription: Stop cancellation fixture.\n---\nInstructions.\n",
+    );
+    const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+    const relDir = path.join(dataRoot, "skill-relations");
+    fs.mkdirSync(relDir, { recursive: true, mode: 0o700 });
+    const lock = new FileLock(path.join(relDir, "graph.jsonl"));
+    expect(await lock.acquire()).toBe(true);
+
+    const listSpy = vi.spyOn(skills, "listAvailableSkills");
+    try {
+      const api = createApi({
+        registrationMode: "full",
+        pluginConfig: { qmd: { indexRefreshIntervalSeconds: 0 } },
+      });
+      createPlugin(api).register(api);
+      await vi.waitFor(() => expect(listSpy).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      const stop = api.on.mock.calls.find(
+        ([name]) => name === "gateway_stop",
+      )![1] as () => Promise<void>;
+      const startedAt = performance.now();
+      await stop();
+      expect(performance.now() - startedAt).toBeLessThan(1_500);
+      expect(fs.existsSync(relationSourcesPath(dataRoot))).toBe(false);
+    } finally {
+      lock.release();
+    }
+    expect(fs.existsSync(relationSourcesPath(dataRoot))).toBe(false);
   });
 });

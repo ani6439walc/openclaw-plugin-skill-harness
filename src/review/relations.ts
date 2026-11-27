@@ -6,6 +6,7 @@ import type { AvailableSkill } from "../skills/types.js";
 import { resolveConfinedFile } from "../skills/paths.js";
 import {
   ensureKnownRelationSources,
+  inspectRelationSources,
   readRelationSources,
   type KnownRelationRoot,
 } from "../skills/relation-sources.js";
@@ -118,7 +119,15 @@ export async function prepareRelationReviewContext(params: {
   };
   if (!requestedSeeds.length) return skip("no-seeds");
   const hasKnownRoots = Boolean(params.knownRoots?.length);
-  if (!hasKnownRoots && !readRelationSources(params.dataRoot))
+  const initialRegistry = await inspectRelationSources(
+    params.dataRoot,
+    params.signal,
+  );
+  checkActive();
+  if (
+    initialRegistry.status === "invalid" ||
+    (initialRegistry.status === "missing" && !hasKnownRoots)
+  )
     return skip("registry-unavailable");
   const initialWinners = visibleWinners(await params.getVisibleSkills());
   checkActive();
@@ -134,11 +143,22 @@ export async function prepareRelationReviewContext(params: {
     winners: ReadonlyMap<string, AvailableSkill>,
   ): Promise<RelationSkillAdmission> {
     checkActive();
+    let registryState = await inspectRelationSources(
+      params.dataRoot,
+      params.signal,
+    );
+    checkActive();
+    if (
+      registryState.status === "invalid" ||
+      (registryState.status === "missing" && !hasKnownRoots)
+    ) {
+      registryFailed = true;
+      return { status: "ineligible", reason: "registry-unavailable" };
+    }
+    let registry =
+      registryState.status === "valid" ? registryState.registry : undefined;
     const skill = winners.get(canonicalIdentity(name));
     if (!skill) return { status: "ineligible", reason: "not-visible" };
-    let registry = readRelationSources(params.dataRoot);
-    if (!registry && !hasKnownRoots)
-      return { status: "ineligible", reason: "registry-unavailable" };
     try {
       const file = await resolveConfinedFile(
         path.dirname(skill.location),
@@ -173,13 +193,21 @@ export async function prepareRelationReviewContext(params: {
           registryFailed = true;
           return { status: "ineligible", reason: "registry-unavailable" };
         }
-        if (synced.registeredCount > 0) {
-          registry = readRelationSources(params.dataRoot);
-          identity = registry
-            ? await readSkillIdentity(skill, registry)
-            : undefined;
-          checkActive();
+        registryState = await inspectRelationSources(
+          params.dataRoot,
+          params.signal,
+        );
+        checkActive();
+        if (registryState.status === "invalid") {
+          registryFailed = true;
+          return { status: "ineligible", reason: "registry-unavailable" };
         }
+        registry =
+          registryState.status === "valid" ? registryState.registry : undefined;
+        identity = registry
+          ? await readSkillIdentity(skill, registry)
+          : undefined;
+        checkActive();
       }
       if (!identity?.source_id)
         return { status: "ineligible", reason: "unregistered" };

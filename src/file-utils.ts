@@ -1,4 +1,5 @@
 import { formatErrorDiagnostic } from "./error-diagnostics.js";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,16 +79,34 @@ export function sessionsPath(filename: string, dataRoot = packageRoot): string {
   return path.join(sessionsDirPath(dataRoot), filename);
 }
 
+export interface WriteJsonAtomicOptions {
+  mode?: number;
+  signal?: AbortSignal;
+}
+
 /**
  * Write JSON data atomically: write to temp file, then rename.
  * This prevents corruption if the process crashes mid-write.
  */
-export function writeJsonAtomic(filePath: string, data: unknown): void {
+export function writeJsonAtomic(
+  filePath: string,
+  data: unknown,
+  options?: WriteJsonAtomicOptions,
+): void {
+  options?.signal?.throwIfAborted();
   const dir = path.dirname(filePath);
-  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
   try {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+    fs.writeFileSync(
+      tempPath,
+      JSON.stringify(data, null, 2),
+      options?.mode !== undefined ? { mode: options.mode } : undefined,
+    );
+    if (options?.mode !== undefined) {
+      fs.chmodSync(tempPath, options.mode);
+    }
+    options?.signal?.throwIfAborted();
     fs.renameSync(tempPath, filePath);
   } catch (error) {
     try {
@@ -145,8 +164,26 @@ import {
  * Non-blocking sleep using setTimeout + Promise.
  * Avoids Atomics.wait which blocks the Node.js event loop.
  */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      try {
+        signal.throwIfAborted();
+      } catch (err) {
+        reject(err);
+      }
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 type FileLockOwner = {
@@ -297,7 +334,10 @@ export class FileLock {
    * Acquire the lock with exponential backoff (async, non-blocking).
    * Returns true if acquired, false if timeout.
    */
-  async acquire(options: { maxWaitMs?: number } = {}): Promise<boolean> {
+  async acquire(
+    options: { maxWaitMs?: number; signal?: AbortSignal } = {},
+  ): Promise<boolean> {
+    options.signal?.throwIfAborted();
     const start = Date.now();
     const maxWaitMs = Math.max(0, options.maxWaitMs ?? LOCK_MAX_WAIT_MS);
     let backoff = LOCK_INITIAL_BACKOFF_MS;
@@ -310,6 +350,7 @@ export class FileLock {
     }
 
     while (true) {
+      options.signal?.throwIfAborted();
       // Try to acquire the lock
       try {
         fs.mkdirSync(this.lockPath);
@@ -350,7 +391,7 @@ export class FileLock {
 
       // Non-blocking exponential backoff wait
       const sleepTime = Math.min(backoff, maxWaitMs - elapsed);
-      await sleep(sleepTime);
+      await sleep(sleepTime, options.signal);
       backoff = Math.min(backoff * 2, LOCK_MAX_BACKOFF_MS);
     }
   }
@@ -375,7 +416,7 @@ export class FileLock {
 export async function withFileLock<T>(
   targetPath: string,
   fn: () => Promise<T>,
-  options: { maxWaitMs?: number } = {},
+  options: { maxWaitMs?: number; signal?: AbortSignal } = {},
 ): Promise<T | undefined> {
   const lock = new FileLock(targetPath);
   if (!(await lock.acquire(options))) return undefined;

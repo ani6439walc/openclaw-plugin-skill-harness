@@ -250,7 +250,8 @@ Stable relation identity uses `source_id` plus an immutable `skill_key`; it must
 not include the current filesystem path or content fingerprint. GitHub source
 IDs use `github:owner/repository`; self-hosted Git includes its host. Standalone
 local collections receive one persistent `local:<UUID>` source ID through
-explicit registration, with mutable human labels kept separate. Placement
+explicit registration or automatic registration of known OpenClaw skill roots,
+with mutable human labels kept separate. Placement
 categories (`workshop`, `workspace`, `managed`, etc.) are not origin identity.
 Known remote provenance survives local installation; unknown copies must not be
 merged by name, matching contents or a guessed Git origin.
@@ -262,15 +263,25 @@ not create UUIDs, bindings or sidecars. Full-registration skill refreshes and
 Review preparation/admission with resolved known OpenClaw skill roots
 (`resolveSkillRoots`) may auto-register unregistered valid skills under those
 known roots via `ensureKnownRelationSources`, reusing each root's existing
-`local:<UUID>` (or allocating one per root), never duplicating already-bound
+`local:<UUID>` (or allocating one per root only on a fresh install or an
+existing valid registry), parsing skill frontmatter as inert YAML only,
+validating full eligibility before acquiring the lock so ineligible skills do
+not create `skill-relations/`, never duplicating already-bound
 physical files (such as `github:*` bindings or symlink aliases), never
-overwriting/renaming/removing existing bindings, and failing closed on corrupt
-or symlinked registries. Registration, explicit rebind/rename,
+overwriting/renaming/removing existing bindings, publishing `sources.json`
+atomically with mode `0600` already set before rename, honoring cancellation
+right before synchronous publication (including stop-owned cancellation on
+`gateway_stop`), and failing closed on corrupt, symlinked, or missing-with-existing-graph
+registries. Review distinguishes missing vs. invalid registry state up front
+and reloads the registry after every successful sync (including concurrent
+zero-write no-ops). Registration, explicit rebind/rename,
 and graph publication share the graph lock; missing, invalid or ambiguous
 bindings fail open without borrowing another source's relations. Only current
 visible winning skills may resolve graph endpoints. Back up the registry with
 graph/schema and preserve it during host moves; losing it does not authorize
-regenerating local identities or guessing that matching names share lineage.
+regenerating local identities or guessing that matching names share lineage
+(automatic bootstrap refuses to mint new local UUIDs when `sources.json` is
+absent alongside an existing stable-ID `graph.jsonl`).
 Removing a skill from a registration input does not delete its binding. Use
 explicit `removeKeys` to retire deleted source entries before a complete catalog
 rebuild, preserving the collection ID and every remaining immutable key.
