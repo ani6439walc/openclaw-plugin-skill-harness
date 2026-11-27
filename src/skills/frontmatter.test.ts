@@ -35,6 +35,15 @@ describe("parseInertYamlFrontmatter", () => {
       data: {},
       content: "----\nnot frontmatter\n",
     });
+
+    expect(
+      parseInertYamlFrontmatter(
+        "\uFEFF---\nname: bom-skill\ndescription: utf8 bom\n---\nBOM body\n",
+      ),
+    ).toEqual({
+      data: { name: "bom-skill", description: "utf8 bom" },
+      content: "BOM body\n",
+    });
   });
 
   it("rejects executable and non-YAML frontmatter formats before parsing", () => {
@@ -45,6 +54,7 @@ describe("parseInertYamlFrontmatter", () => {
     try {
       for (const raw of [
         `---js\n(() => { globalThis.${sentinelKey} = true; return { name: "pwn" }; })()\n---\nBody\n`,
+        `\uFEFF---js\n(() => { globalThis.${sentinelKey} = true; return { name: "pwn" }; })()\n---\nBody\n`,
         `---javascript\n(() => { globalThis.${sentinelKey} = true; return { name: "pwn" }; })()\n---\nBody\n`,
         `---json\n{"name":"json-skill"}\n---\nBody\n`,
         `---coffee\nname: coffee-skill\n---\nBody\n`,

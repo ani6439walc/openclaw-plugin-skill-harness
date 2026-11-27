@@ -27,17 +27,20 @@ export interface ParsedFrontmatter {
  * rejected before parsing so no executable engine can ever run.
  */
 export function parseInertYamlFrontmatter(raw: string): ParsedFrontmatter {
-  if (!raw.startsWith("---") || raw.startsWith("----")) {
-    return { data: {}, content: raw };
+  const normalized = raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
+  if (!normalized.startsWith("---") || normalized.startsWith("----")) {
+    return { data: {}, content: normalized };
   }
-  const lineEnd = raw.search(/\r?\n/);
-  const headerTag = (lineEnd === -1 ? raw.slice(3) : raw.slice(3, lineEnd))
+  const lineEnd = normalized.search(/\r?\n/);
+  const headerTag = (
+    lineEnd === -1 ? normalized.slice(3) : normalized.slice(3, lineEnd)
+  )
     .trim()
     .toLowerCase();
   if (headerTag !== "" && headerTag !== "yaml" && headerTag !== "yml") {
     rejectUnsupportedFormat();
   }
-  const parsed = matter(raw, {
+  const parsed = matter(normalized, {
     language: "yaml",
     engines: DISABLED_NON_YAML_ENGINES,
   });

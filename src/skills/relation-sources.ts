@@ -6,6 +6,7 @@ import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import { canonicalIdentity } from "../normalize.js";
 import { parseInertYamlFrontmatter } from "./frontmatter.js";
 import { resolveConfinedFile } from "./paths.js";
+import { replayRelationGraph } from "./relation-graph.js";
 import type { SkillSource } from "./types.js";
 
 export interface RelationSourceBinding {
@@ -606,18 +607,17 @@ async function hasDependentGraphState(
   }
   signal?.throwIfAborted();
   if (!raw.trim()) return false;
+  // Reuse canonical graph replay so any structurally invalid record fails closed.
+  try {
+    replayRelationGraph(raw);
+  } catch {
+    return true;
+  }
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
-    let record: unknown;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      return true;
-    }
-    if (!object(record)) return true;
+    const record = JSON.parse(line) as Record<string, unknown>;
     if (record.op === "create") {
-      const entity = record.entity;
-      if (!object(entity)) return true;
+      const entity = record.entity as Record<string, unknown>;
       if (
         isStableGraphSkillId(entity.id) ||
         (object(entity.properties) &&
@@ -636,11 +636,44 @@ async function hasDependentGraphState(
       ) {
         return true;
       }
-    } else {
-      return true;
     }
   }
   return false;
+}
+
+async function readSourcesFileState(
+  sourcesFile: string,
+  signal?: AbortSignal,
+): Promise<
+  | { status: "valid"; registry: RelationSourceRegistry }
+  | { status: "enoent" }
+  | { status: "invalid" }
+> {
+  let fileStat;
+  try {
+    fileStat = await fs.lstat(sourcesFile);
+    signal?.throwIfAborted();
+  } catch (error) {
+    signal?.throwIfAborted();
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { status: "enoent" };
+    }
+    return { status: "invalid" };
+  }
+
+  if (!fileStat.isFile() || fileStat.isSymbolicLink()) {
+    return { status: "invalid" };
+  }
+
+  try {
+    const raw = await fs.readFile(sourcesFile, "utf8");
+    signal?.throwIfAborted();
+    const registry = validateRelationSources(JSON.parse(raw));
+    return { status: "valid", registry };
+  } catch {
+    signal?.throwIfAborted();
+    return { status: "invalid" };
+  }
 }
 
 /**
@@ -670,37 +703,33 @@ export async function inspectRelationSources(
     return { status: "invalid", reason: "invalid-directory" };
   }
 
-  let fileStat;
-  try {
-    fileStat = await fs.lstat(sourcesFile);
-    signal?.throwIfAborted();
-  } catch (error) {
-    signal?.throwIfAborted();
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      const dependent = await hasDependentGraphState(
-        path.join(directory, "graph.jsonl"),
-        signal,
-      );
-      return dependent
-        ? { status: "invalid", reason: "missing-with-existing-graph" }
-        : { status: "missing" };
-    }
+  const initial = await readSourcesFileState(sourcesFile, signal);
+  if (initial.status === "valid") {
+    return { status: "valid", registry: initial.registry };
+  }
+  if (initial.status === "invalid") {
     return { status: "invalid", reason: "invalid-registry" };
   }
 
-  if (!fileStat.isFile() || fileStat.isSymbolicLink()) {
-    return { status: "invalid", reason: "invalid-registry" };
+  const dependent = await hasDependentGraphState(
+    path.join(directory, "graph.jsonl"),
+    signal,
+  );
+  if (!dependent) {
+    return { status: "missing" };
   }
 
-  try {
-    const raw = await fs.readFile(sourcesFile, "utf8");
-    signal?.throwIfAborted();
-    const registry = validateRelationSources(JSON.parse(raw));
-    return { status: "valid", registry };
-  } catch {
-    signal?.throwIfAborted();
+  // A peer may have published `sources.json` and then `graph.jsonl` between our
+  // initial registry miss and graph inspection; recheck before declaring a
+  // missing-registry fault.
+  const rechecked = await readSourcesFileState(sourcesFile, signal);
+  if (rechecked.status === "valid") {
+    return { status: "valid", registry: rechecked.registry };
+  }
+  if (rechecked.status === "invalid") {
     return { status: "invalid", reason: "invalid-registry" };
   }
+  return { status: "invalid", reason: "missing-with-existing-graph" };
 }
 
 interface PlannedAutoRegistration {

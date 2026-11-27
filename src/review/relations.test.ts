@@ -802,4 +802,83 @@ it("reports registry-unavailable up front for corrupt, symlinked, or missing-wit
     expect.objectContaining({ reason: "registry-unavailable" }),
   );
   await expect(fs.stat(relationSourcesPath(partialRoot))).rejects.toThrow();
+
+  // 4. Peer publishes sources.json + stable-ID graph between initial miss and graph check -> Review still becomes ready.
+  const raceRoot = path.join(root, "race-publish");
+  const raceSources = relationSourcesPath(raceRoot);
+  const raceGraph = relationGraphPath(raceRoot);
+  const realKnownRoot = await fs.realpath(knownRoot);
+  const raceSourceId = "local:44444444-4444-4444-8444-444444444444";
+  await fs.mkdir(path.dirname(raceSources), { recursive: true });
+  const realLstat = fs.lstat.bind(fs);
+  let injectedMiss = false;
+  const lstatSpy = vi
+    .spyOn(fs, "lstat")
+    .mockImplementation(async (targetPath, ...rest) => {
+      if (!injectedMiss && String(targetPath) === raceSources) {
+        injectedMiss = true;
+        await fs.writeFile(
+          raceSources,
+          JSON.stringify(
+            {
+              version: 1,
+              sources: [
+                {
+                  id: raceSourceId,
+                  root: realKnownRoot,
+                  skills: {
+                    "valid-skill": {
+                      name: "valid-skill",
+                      source_path: "valid-skill/SKILL.md",
+                    },
+                  },
+                },
+              ],
+            },
+            null,
+            2,
+          ),
+          { mode: 0o600 },
+        );
+        await fs.writeFile(
+          raceGraph,
+          `${JSON.stringify({
+            op: "create",
+            entity: {
+              id: `${raceSourceId}:valid-skill`,
+              type: "Skill",
+              properties: {
+                name: "valid-skill",
+                source_id: raceSourceId,
+                skill_key: "valid-skill",
+                source_path: "valid-skill/SKILL.md",
+                formatVersion: 2,
+              },
+            },
+          })}\n`,
+        );
+        const err = new Error("ENOENT") as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        throw err;
+      }
+      return realLstat(targetPath, ...rest);
+    });
+
+  try {
+    const onRace = vi.fn();
+    const racedContext = await prepareRelationReviewContext({
+      dataRoot: raceRoot,
+      seedNames: ["valid-skill"],
+      getVisibleSkills: async () => visible,
+      knownRoots,
+      onPreparation: onRace,
+    });
+    expect(racedContext).toBeDefined();
+    expect(racedContext!.seedIds).toEqual([`${raceSourceId}:valid-skill`]);
+    expect(onRace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "ready", capturedSeeds: 1 }),
+    );
+  } finally {
+    lstatSpy.mockRestore();
+  }
 });

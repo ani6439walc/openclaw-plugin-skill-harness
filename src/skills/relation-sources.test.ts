@@ -625,6 +625,15 @@ it("refuses to mint new local UUIDs when sources.json is missing alongside an ex
       })}\n`,
     ],
     ["corrupt-graph", "{not-json\n"],
+    ["structurally-invalid-delete", `${JSON.stringify({ op: "delete" })}\n`],
+    [
+      "structurally-invalid-create",
+      `${JSON.stringify({ op: "create", entity: { id: "only-id" } })}\n`,
+    ],
+    [
+      "structurally-invalid-relate",
+      `${JSON.stringify({ op: "relate", from: "a", rel: "related", to: "b", properties: [] })}\n`,
+    ],
   ] as const) {
     const partialDataRoot = path.join(root, `partial-${label}`);
     const graphPath = path.join(
@@ -825,5 +834,128 @@ it("coordinates with another process sharing the graph.jsonl lock without losing
   } finally {
     if (child.exitCode === null) child.kill();
     await exited;
+  }
+});
+
+it("accepts UTF-8 BOM-prefixed YAML skills in both automatic and explicit registration", async () => {
+  const autoRoot = path.join(root, "bom-auto");
+  const explicitRoot = path.join(root, "bom-explicit");
+  const autoFile = path.join(autoRoot, "bom-one", "SKILL.md");
+  const explicitFile = path.join(explicitRoot, "bom-two", "SKILL.md");
+  await fs.mkdir(path.dirname(autoFile), { recursive: true });
+  await fs.mkdir(path.dirname(explicitFile), { recursive: true });
+  await fs.writeFile(
+    autoFile,
+    "\uFEFF---\nname: bom-one\ndescription: BOM auto\n---\nBody\n",
+  );
+  await fs.writeFile(
+    explicitFile,
+    "\uFEFF---\nname: bom-two\ndescription: BOM explicit\n---\nBody\n",
+  );
+
+  const synced = await ensureKnownRelationSources({
+    dataRoot: root,
+    skills: [{ name: "bom-one", location: autoFile }],
+    roots: [{ path: autoRoot, source: "workspace" }],
+  });
+  expect(synced?.registeredCount).toBe(1);
+
+  const explicit = await registerRelationSource(root, {
+    root: explicitRoot,
+    skills: {
+      "bom-two": { name: "bom-two", source_path: "bom-two/SKILL.md" },
+    },
+  });
+  const registry = readRelationSources(root)!;
+  expect(
+    (
+      await resolveRelationSource(
+        { name: "bom-one", location: autoFile },
+        registry,
+      )
+    )?.skill_key,
+  ).toBe("bom-one");
+  expect(
+    (
+      await resolveRelationSource(
+        { name: "bom-two", location: explicitFile },
+        registry,
+      )
+    )?.id,
+  ).toBe(`${explicit.id}:bom-two`);
+});
+
+it("rechecks sources.json when a peer publishes registry and graph between initial miss and graph read", async () => {
+  const collection = path.join(root, "racy-collection");
+  const realCollection = await fs.realpath(
+    await fs.mkdir(collection, { recursive: true }).then(() => collection),
+  );
+  await skill(path.join(collection, "racy"), "racy");
+  const relDir = path.join(root, "skill-relations");
+  await fs.mkdir(relDir, { recursive: true, mode: 0o700 });
+  const sourcesFile = relationSourcesPath(root);
+  const graphFile = path.join(relDir, "graph.jsonl");
+  const sourceId = "local:33333333-3333-4333-8333-333333333333";
+
+  const realLstat = fs.lstat.bind(fs);
+  let missedOnce = false;
+  const lstatSpy = vi
+    .spyOn(fs, "lstat")
+    .mockImplementation(async (targetPath, ...rest) => {
+      if (!missedOnce && String(targetPath) === sourcesFile) {
+        missedOnce = true;
+        // Peer publishes sources.json + stable-ID graph immediately after our initial miss.
+        await fs.writeFile(
+          sourcesFile,
+          JSON.stringify(
+            {
+              version: 1,
+              sources: [
+                {
+                  id: sourceId,
+                  root: realCollection,
+                  skills: {
+                    racy: { name: "racy", source_path: "racy/SKILL.md" },
+                  },
+                },
+              ],
+            },
+            null,
+            2,
+          ),
+          { mode: 0o600 },
+        );
+        await fs.writeFile(
+          graphFile,
+          `${JSON.stringify({
+            op: "create",
+            entity: {
+              id: `${sourceId}:racy`,
+              type: "Skill",
+              properties: {
+                name: "racy",
+                source_id: sourceId,
+                skill_key: "racy",
+                source_path: "racy/SKILL.md",
+                formatVersion: 2,
+              },
+            },
+          })}\n`,
+        );
+        const err = new Error("ENOENT") as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        throw err;
+      }
+      return realLstat(targetPath, ...rest);
+    });
+
+  try {
+    const inspected = await inspectRelationSources(root);
+    expect(inspected.status).toBe("valid");
+    if (inspected.status === "valid") {
+      expect(inspected.registry.sources[0]?.id).toBe(sourceId);
+    }
+  } finally {
+    lstatSpy.mockRestore();
   }
 });
