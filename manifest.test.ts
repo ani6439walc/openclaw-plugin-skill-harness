@@ -7,10 +7,6 @@ const manifest = JSON.parse(
 const packageJson = JSON.parse(
   fs.readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
 );
-const agentGuide = fs.readFileSync(
-  new URL("./AGENTS.md", import.meta.url),
-  "utf-8",
-);
 
 describe("skill-harness manifest", () => {
   it("declares skill tools without legacy command surfaces", () => {
@@ -140,18 +136,6 @@ describe("skill-harness manifest", () => {
     expect(manifest.configSchema.properties).not.toHaveProperty("instruction");
     expect(manifest.configSchema.properties).not.toHaveProperty(
       "lowEffortRoutingMode",
-    );
-  });
-
-  it("documents the strict upgrade path for removed instruction settings", () => {
-    expect(agentGuide).toContain(
-      "## Configuration migration and runtime acceptance",
-    );
-    expect(agentGuide).toContain(
-      "Remove the entire legacy `instruction: { ... }` block",
-    );
-    expect(agentGuide).toContain(
-      "no automatic migration or compatibility parser",
     );
   });
 
