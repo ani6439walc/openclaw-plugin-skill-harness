@@ -63,15 +63,15 @@ Automatic selection resolves the agent's host `decisionModel` string, then `agen
 
 Skills and bounded relations share one full evaluation per eligible turn; hook rebuilds share that turn's in-flight/terminal result, including failures and cancellation. Empty candidate pools skip client creation and credential resolution. Validate the full batch (256 questions, 1 MiB JSON, 20,000 nodes, depth 32); reject unsupported input without truncating candidates or splitting requests. Deadlines and lifecycle shutdown abort selection and drain accepted work. Preserve hook/turn/generation checks before mutation; diagnostic strings expose only fixed routes/reasons/codes and aggregate counts/timing.
 
-`qmd.jev` is QMD-only. Plugin `decisionModel` independently serves the selector and explicit manual relation importer; no copying, cross-fallback, or root `jev` alias exists. Both preserve provider/model, provider-catalog, environment, and supported SecretRef resolution. Invalid present endpoint objects must fail open at the runtime caller; the strict manifest rejects the retired root `jev`. `buildStoreModels()` consumes only resolved QMD configuration. Changing plugin `decisionModel` must not rotate stores or alter index identity. Changing `qmd.jev` preserves drain/reopen and embedding fingerprint behavior. Managed searches retain `rerank: false`; expansion uses `qmd.expansion`. Native QMD Jev expansion compatibility and `TYPESAFE_*` environment sources remain available when `qmd.jev` is omitted; omission is not a total disable.
+`qmd.jev` is QMD-only. Plugin `decisionModel` independently serves the selector and explicit manual relation importer; no copying or cross-fallback exists. Both preserve provider/model, provider-catalog, environment, and supported SecretRef resolution. Invalid present endpoint objects must fail open at the runtime caller; the strict manifest accepts only `qmd.jev` and `decisionModel`. `buildStoreModels()` consumes only resolved QMD configuration. Changing plugin `decisionModel` must not rotate stores or alter index identity. Changing `qmd.jev` preserves drain/reopen and embedding fingerprint behavior. Managed searches retain `rerank: false`; expansion uses `qmd.expansion`. Native QMD Jev expansion compatibility and `TYPESAFE_*` environment sources remain available when `qmd.jev` is omitted; omission is not a total disable.
 
 Direct skill discovery combines bounded typo-aware name matching (strip URLs before tokenization) and `SkillQmdIndex` retrieval over metadata, bodies and references (`minCandidateScore` defaults to 0.6). Expand the visible candidates from those original hits using bounded graph relations. Score the candidates once through the selected adapter, retain visible names that meet the relevance threshold, sort by score with UTF-16 name order for ties, and cap the result at `maxInjectedSkills`. A zero limit skips dynamic discovery. Failed selection leaves static working-set guidance available.
 
-Topic checkers (`previousTopic`), runtime task complexity scoring (`complexity`), classifier `suggestion` fields, session curation (`curation` / `curationAppliedCount`), instruction writers, legacy `routing.intents` configuration, legacy `routing.model`, `routing.modelFallback`, `routing.thinking`, routing subagent fallback, legacy `fastpath` / `candidate` frontmatter fields, and legacy pseudo-headers (`[Skill Harness Context...]`, `[User Message]:`) are obsolete and strictly forbidden. Do not use OpenClaw core's reserved `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>` delimiters in plugin prompt output as core runtime logic strips them from visible turns; these delimiters are sanitizer-only input boundaries.
+Do not use OpenClaw core's reserved `<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>` delimiters in plugin prompt output as core runtime logic strips them from visible turns; these delimiters are sanitizer-only input boundaries.
 
 The managed skill index lives under `dataRoot/qmd/skills/`. `review.enabled` controls automatic relation checks and defaults to false. `review.triggers.relationHealthCheck.everyTurns` is the only cadence setting (default 10). Count distinct completed turns per session with a final skill recommendation or successful load. A qualifying turn increments the count once even with multiple skills or repeated finalization. A turn without skills leaves the count unchanged.
 
-Fresh schema-v7 `stats.json` records skill, tool, routing, projection, inventory, and daily telemetry. Current top-level selections do not create intents; per-intent route-reason aggregates are populated only when historical `state.intent.result` exists. Older stats schemas are rejected fail-open without migration or rewrite. QMD scores use retrieval hit scores; classifier scores use classifier confidence. The runtime-health report exposes aggregate inventory counts without agent or skill names.
+Schema-v7 `stats.json` records skill, tool, routing, projection, inventory, and daily telemetry. Unsupported stats schemas are rejected fail-open without migration or rewrite. QMD scores use retrieval hit scores; classifier scores use classifier confidence. The runtime-health report exposes aggregate inventory counts without agent or skill names.
 
 See [Relation Review execution](#relation-review-execution) for scheduling and disposal. The `scripts/` CLIs are explicitly invoked maintenance resources; they must not recreate production routing or Review persistence.
 
@@ -98,7 +98,7 @@ disposal, propagate abort signals, and await active work before closing indexes.
 Gateway admission remains authoritative during restart draining; handle its
 rejection without probing private drain-state fields.
 
-Conversation sanitization is a compatibility boundary for input, not a prompt-output format. It removes the current OpenClaw timestamp plus `Conversation info: ⟦openclaw:ctx⟧` fenced JSON envelope, legacy `Sender (untrusted metadata)` metadata, Skill Harness routing blocks, active-memory blocks, assembled-context wrappers, and OpenClaw internal runtime delimiters before recent-turn extraction. A user entry containing only runtime metadata sanitizes to empty; inter-session or internal task-completion user entries also suppress their following assistant payload. External user and assistant messages remain role-tagged. Sessions containing retired intent fields such as `recommendedSkills` are rejected entirely on load, without migration; other unknown intent fields that pass validation are not automatically removed; new turns persist top-level `matchedSkills`, `confidence`, and `inputSkillDiscovery`; `intentMatchedSkills` is retained only for reading historical intent state. Empty selections still represent routed turns for statistics. Review cadence counts completed turns with final recommended skills or successfully loaded skills.
+Conversation sanitization is a compatibility boundary for input, not a prompt-output format. It removes the current OpenClaw timestamp plus `Conversation info: ⟦openclaw:ctx⟧` fenced JSON envelope, `Sender (untrusted metadata)` metadata, Skill Harness routing blocks, active-memory blocks, assembled-context wrappers, and OpenClaw internal runtime delimiters before recent-turn extraction. A user entry containing only runtime metadata sanitizes to empty; inter-session or internal task-completion user entries also suppress their following assistant payload. External user and assistant messages remain role-tagged. Invalid session records are rejected on load without migration; turns persist top-level `matchedSkills`, `confidence`, and `inputSkillDiscovery`. Empty selections still represent routed turns for statistics. Review cadence counts completed turns with final recommended skills or successfully loaded skills.
 
 Production JSON I/O should use `readJsonFile()`, `writeJsonAtomic()`, or `safeWriteJson()` from `src/file-utils.ts`; do not recreate parsing or atomic-write behavior. Keep `src/plugin.ts` thin and place behavior in its owning domain. Verify uncertain OpenClaw SDK imports, hook payloads, and APIs against the installed package rather than guessing. Typecheck and unit tests do not prove that a running Gateway loaded the plugin; runtime claims require OpenClaw runtime inspection.
 
@@ -118,15 +118,15 @@ Track QMD connection configuration separately from index fingerprints. Drain act
 
 Count adoption only from successful complete `skill_view` responses or successful `read`/`exec` outputs with parseable frontmatter and a nonempty skill name. Exclude explicit errors, `success: false`, empty/unrecognizable output, and path-only inference; preserve same-turn deduplication at both hooks and session merge boundaries. Do not recalculate existing statistics; historical adoption can include old false positives.
 
-QMD skill snapshots must not generate identity sidecars. Full-registration refresh removes legacy `.identity.yml` and `.identity.json` files; both suffixes stay excluded from reference indexing. Preserve unchanged document mtimes, databases, index metadata, and agent mappings. Persist original skill names in the existing agent mapping; use their `safePathSegment()` values to resolve hashed names with fail-open rejection of unknown/ambiguous segments and agent visibility checks. Discovery reads published snapshots without migrating or rebuilding them.
+QMD skill snapshots must not generate identity sidecars; `.identity.yml` and `.identity.json` stay excluded from reference indexing. Preserve unchanged document mtimes, databases, index metadata, and agent mappings. Persist original skill names in the existing agent mapping; use their `safePathSegment()` values to resolve hashed names with fail-open rejection of unknown/ambiguous segments and agent visibility checks. Discovery reads published snapshots without migrating or rebuilding them.
 
-Skill-index GC is full-registration-only and shares the existing QMD refresh cadence. Catalog operations queue FIFO per coordinator before the one-second external lock wait. Zero-wait maintenance skips a busy queue. Catalog locking must cover mapping writes, lease registration, and reclamation; per-instance lifetime pins protect stores through close, including discovery, build, search, embedding, and rotation. Preserve all referenced indexes. Track unreferenced/retired-agent grace in `qmd/skills/gc.json` (24 hours each), reset orphan age on mapping publication or lease acquisition, and reread mappings before deletion. Invalid mappings, unknown lease ownership, symlinks, or busy builds must prevent deletion. Retire agent mappings only from a complete current runtime registry, not stale registration data or query inactivity. Shared active references preserve indexes; do not delete sessions, stats, or Review state. Fully restart all old Gateway generations when deploying the lease protocol; pre-upgrade stores cannot be proven idle by the new protocol.
+Skill-index GC is full-registration-only and shares the existing QMD refresh cadence. Catalog operations queue FIFO per coordinator before the one-second external lock wait. Zero-wait maintenance skips a busy queue. Catalog locking must cover mapping writes, lease registration, and reclamation; per-instance lifetime pins protect stores through close, including discovery, build, search, embedding, and rotation. Preserve all referenced indexes. Track unreferenced/retired-agent grace in `qmd/skills/gc.json` (24 hours each), reset orphan age on mapping publication or lease acquisition, and reread mappings before deletion. Invalid mappings, unknown lease ownership, symlinks, or busy builds must prevent deletion. Retire agent mappings only from a complete current runtime registry, not stale registration data or query inactivity. Shared active references preserve indexes; do not delete sessions, stats, or Review state.
 
 Release a lifetime lease only after its store closes successfully. A retired store close failure must retain the store and lease, log the failure, and allow maintenance of unrelated indexes to continue. Grace periods start on the first maintenance observation, not filesystem age; collection occurs on a subsequent eligible pass. `qmd.indexRefreshIntervalSeconds: 0` disables recurring maintenance, while startup maintenance remains enabled. Treat agent mappings, leases, and `gc.json` as managed runtime state, not disposable caches; no configuration/schema migration or telemetry reset is required for GC. Keep machine-specific deployment observations in private project notes, not repository documentation.
 
 Discovery freshness belongs in the managed index search entrypoints so hooks and tools share the same behavior. Reread skill agent mappings and visible names on subsequent searches. Missing or invalid published state must fail open without a known-stale fallback; a later publication must recover in the same instance. Explicitly open discovery stores with `readOnly: true`; do not build, embed, publish mappings, or collect. Snapshot identity and visible names per acquired search operation. Reuse existing build/catalog locks and lifetime leases without nested catalog acquisition or holding catalog locks across store opening/model requests; drain operations before closing stores. Disposal must await discovery refresh/acquisition and retirement work.
 
-Review schema rejection warnings expose issue paths, codes, counts and a coarse reason. Expand nested union issues to identify failing fields. Omit rejected values, raw replies and evidence text. The historical diagnostic name `missing-trigger-decision` means no valid relation decision survived validation. The parent stamps the fixed relation-health trigger on accepted findings.
+Review schema rejection warnings expose issue paths, codes, counts and a coarse reason. Expand nested union issues to identify failing fields. Omit rejected values, raw replies and evidence text. The parent stamps the fixed `relation-health-check` trigger on accepted findings.
 
 ## Skill relation graph
 
@@ -152,7 +152,7 @@ Discovery belongs to the reviewer: at most four `skill_search` calls per run, th
 
 Use public run `toolBindings` with only a structured-cloneable descriptor (version, random token, and exact agent/session identity). The host clones and fingerprints these values: never transport callback functions. Keep callbacks in a registry owned by one plugin registration and inject that same registry through hooks/runner and registered tools. Validate descriptor ownership and registry membership; reject unknown, cross-registration or closed bindings without a normal-tool fallback. Keep lifetime authority in the origin closure and close the registry during plugin disposal. Close admission and drain accepted work before validation or workspace cleanup. Review `skill_view` bypasses usage writes and marks results `review_inspection`; adoption extraction rejects that marker. Normal tool behavior remains unchanged. Do not depend on tool hooks receiving `toolBindings`.
 
-Eligible runs require independent existing/discovery assessments consistent with proposed operations. Persist those assessments separately from publication receipts. Store preparation status, reasons, counts and bounded search counts. The writer accepts only strict schema-v9 Review logs and preserves unsupported or malformed files. See [configuration migration](#configuration-migration-and-runtime-acceptance) before switching versions.
+Eligible runs require independent existing/discovery assessments consistent with proposed operations. Persist those assessments separately from publication receipts. Store preparation status, reasons, counts and bounded search counts. The writer accepts only strict schema-v9 Review logs and preserves unsupported or malformed files. See [runtime configuration and acceptance](#runtime-configuration-and-acceptance) for deployment validation.
 
 Keep formal Review writes in the graph domain. Under the graph lock, recheck
 current source bindings, visible winners, exact evidence bytes/fingerprints and
@@ -161,9 +161,8 @@ Reject the complete graph batch on a conflict, but allow unrelated graph edits.
 Publish by atomic replacement of unchanged old JSONL plus all new operations:
 create uses `relate`, update uses `unrelate` plus `relate`, delete uses `unrelate`.
 Operation-level `review` metadata retains batch/event/agent IDs, time, rationale,
-exact evidence/digests and the previous relation. New relation properties omit
-`source`; read historical `source: author-import` compatibly and retain imported
-`sourceGraphDigest`. Never compact Review history implicitly. Normal incremental
+exact evidence/digests and the previous relation. Retain imported `sourceGraphDigest`
+on updates. Never compact Review history implicitly. Normal incremental
 imports protect all reviewed ordered pairs across types, including tombstones;
 ontology full-import preflight rejects reviewed destination history. Explicit
 snapshot maintenance remains a separate backed-up replacement path.
@@ -172,9 +171,8 @@ Validate the proposed batch against the staged manifest. Only the parent publish
 
 Author skill relations are imported once into private ontology-v1.0.4-compatible
 JSONL; runtime metadata is not a second relationship source. Keep the original
-reason, direction and provenance. New graph records, relation tool/evidence payloads,
-and XML must omit `verification_status` and the `verification` attribute; author
-assertions remain advisory rather than verified prerequisites. The importer must not edit
+reason, direction and provenance; author assertions remain advisory rather than
+verified prerequisites. The importer must not edit
 fork skills, infer missing reasons, promote model scores to verified dependencies,
 or treat removed metadata as a deletion request. Use explicit preflight,
 limited-sample, full-classification and apply stages; paid model requests and
@@ -189,18 +187,15 @@ changes disable affected edges. Upstream CLI file compatibility does not imply
 its writer participates in plugin locking or enforces plugin validation.
 
 Relation expansion and relation scoring are always active when usable graph
-evidence exists; there is no enable switch. Remove retired
-`routing.skills.related.enabled` settings before upgrading, as both the strict
-manifest and runtime parser reject them. Preserve configured relevanceThreshold.
-Expand only outgoing author declarations from the first
+evidence exists; there is no enable switch. Expand only outgoing declarations from the first
 8 ranked original name/QMD candidates, one hop, round-robin, at most 2 new
 skills per seed and 8 per turn; alphabetize targets and do not charge duplicates.
 Require current visible winning identities and a nonempty original reason.
 Use canonicalIdentity() for graph/visibility lookups, expansion deduplication
 and self comparisons; preserve original names in output.
 Keep all original name and QMD hits. Pass at most 2 reasons of 500
-code points per target to the existing single Decision call, described as author
-reference assertions without a verification-status field.
+code points per target to the existing single Decision call, described as
+reference assertions.
 Do not introduce hard dependency/conflict rules, fabricated retrieval scores,
 new skill selection thresholds or fallback injection. `relatedCandidates` is optional
 session/event diagnostics; `related-declared` injection contributes to pool
@@ -235,10 +230,7 @@ reasons or imply verified prerequisites/order. Relation scores never boost skill
 scores, routing confidence or injection capacity. Optional `relationDecisions`
 session/event diagnostics retain evidence, score and final `injected` status;
 background names are not injected/adopted skills and must not contribute to QMD
-scores or collection counts. Historical sessions and statistics remain readable
-without migration or rewriting retired verification-status fields. Previously
-disabled deployments also gain bounded expansion and scoring on upgrade; local
-tests are not Gateway verification.
+scores or collection counts. Local tests are not Gateway verification.
 
 Stable relation identity uses `source_id` plus an immutable `skill_key`; it must
 not include the current filesystem path or content fingerprint. GitHub source
@@ -273,12 +265,7 @@ source reasons, labels and direction, without carrying old classification scores
 onto changed evidence. Keep the upstream ontology schema separate from these
 private runtime bindings and evidence fields.
 
-Legacy v1 graphs retain their legacy reader/identity checks; new v2 records must
-not receive v1 fallback validation when registry/evidence is unavailable. Stage
-and validate rebuilds before switching the formal graph, retain a complete
-rollback backup, and coordinate publication with a compatible plugin build.
-Do not publish stable-ID records while an old loaded plugin still expects hashed
-v1 identities. This is a graph-format change, with no session/statistics reset.
+Stage and validate graph rebuilds before switching the formal graph, and retain a complete rollback backup. This does not reset sessions or statistics.
 
 Keep graph implementation in `src/skills/relation-graph.ts`, import and fixed Jev
 classification in `relation-import.ts`, and bounded routing expansion in
@@ -323,11 +310,11 @@ Review scheduling uses `IntentReviewScheduler` to debounce runs after a turn fin
 
 ## Telemetry interpretation and retention
 
-Schema-v7 statistics track the telemetry cohort across versions. Current turns record top-level selections, confidence, skill/tool usage, routing adoption, projection, inventory, and daily aggregates without creating an intent. Historical `state.intent.result` can still populate per-intent route reasons (`qmd-keyword`, `qmd-hybrid`, and `llm-classifier`) with count, average score, minimum score, and maximum score; those compatibility fields do not imply current intent classification. QMD evidence uses retrieval hit scores; selector confidence comes from the selected Decision adapter. `skillDiscovery` separately records input skill matching: name-match and QMD search candidates, QMD semantic-score distribution, collection hit distribution (`meta`, `body`, `references`) for retrieved candidates and final injected skills, pre-injection candidate and injection counts, fallback reasons, and duration summaries. It does not retain user requests, snippets, QMD explanations, or per-hit score lists. Per-day maps include the same aggregate input skill-match telemetry alongside intent outcomes, intent routing, intent-matched skill routing, and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
+Schema-v7 statistics track the telemetry cohort across versions, recording top-level selections, confidence, skill/tool usage, routing adoption, projection, inventory, and daily aggregates. QMD evidence uses retrieval hit scores; selector confidence comes from the selected Decision adapter. `skillDiscovery` separately records input skill matching: name-match and QMD search candidates, QMD semantic-score distribution, collection hit distribution (`meta`, `body`, `references`) for retrieved candidates and final injected skills, pre-injection candidate and injection counts, fallback reasons, and duration summaries. It does not retain user requests, snippets, QMD explanations, or per-hit score lists. Per-day maps include the same aggregate input skill-match telemetry alongside skill routing and tool errors; top-level tool latency uses fixed `unknown`, `0-99`, `100-499`, `500-999`, `1000-4999`, and `5000+` millisecond buckets. Each daily attribution map permits 64 encoded `value:<trimmed-name>` keys and then aggregates further names into the reserved `__other__` key.
 
-The runtime-health projection keeps one canonical `routing` block, one canonical `projection` block, and names retained processed events as `retainedProcessedEventCount`. It omits the duplicate `routingEffectiveness` / `projectionEfficiency` aliases and the internal `dailyDynamicKeyCardinality` diagnostic.
+The runtime-health projection keeps one canonical `routing` block, one canonical `projection` block, and names retained processed events as `retainedProcessedEventCount`.
 
-Schema v7 does not migrate or rewrite schema-v1 through schema-v6 files: older telemetry is rejected fail-open and remains untouched. Inventory observations are agent-scoped: source, winning-path and content fingerprints, observation times and counts, same-turn usage, and intent-matched skill opportunities form an epoch. Source, winner, content, or visibility-continuity changes begin a new epoch; the fingerprints remain internal and are never exposed by skill tools.
+Unsupported stats schemas are rejected fail-open without migration or rewrite. Inventory observations are agent-scoped: source, winning-path and content fingerprints, observation times and counts, and same-turn usage form an epoch. Source, winner, content, or visibility-continuity changes begin a new epoch; the fingerprints remain internal and are never exposed by skill tools.
 
 Rendered catalog sizes are Unicode code points, not provider-billed tokens.
 Adoption is same-turn use, not task success or routing accuracy. Related metadata
@@ -406,8 +393,8 @@ A healthy report **does not prove Gateway loaded the plugin**. Review logs also 
 - Confidence is selector confidence, not retrieval similarity or calibrated accuracy. A nonempty pool with no injection does not identify selector failure versus an intentional rejection. Exact selector failure reasons, stage latency, model costs, and true precision/recall are unobserved.
 - Session selection requires a recorded matched-skill array. Usage comparisons require completed turns with usage records. Missing fields reduce coverage.
 - Daily usage names are raw; daily `skillRouting` and `toolErrors` keys are encoded and may overflow into `__other__`. Overflow makes per-skill injection/adoption comparison unavailable; aggregate rates remain usable. Do not subtract usage and injection totals from different populations.
-- A `missing-trigger-decision` rejection can follow a malformed positive relation finding. New schema warnings expose issue paths/codes/counts without content; alternative union branches may contribute additional paths. Historical coarse reasons cannot recover the original invalid field, and detached Review transcripts are not retained.
-- Historical schema-v9 receipts can contain overlapping triggers. Current runs use only `relation-health-check`. Calculate outcome rates over completed events. Count graph changes from committed findings in applied events. `changes.averagePerAppliedEvent` divides committed findings by `changes.appliedEvents`. An empty history establishes only that no completions were observed. A no-finding decision may be appropriate.
+- New schema warnings expose issue paths/codes/counts without content; alternative union branches may contribute additional paths. Detached Review transcripts are not retained.
+- Review runs use the `relation-health-check` trigger. Calculate outcome rates over completed events. Count graph changes from committed findings in applied events. `changes.averagePerAppliedEvent` divides committed findings by `changes.appliedEvents`. An empty history establishes only that no completions were observed. A no-finding decision may be appropriate.
 - Retained aggregates do not establish causality or record configuration changes. A previous-period difference is a prompt to investigate, not proof of an improvement or regression.
 
 ### Present the result and bounded next steps
@@ -429,7 +416,7 @@ When diagnosing an unchanged graph, inspect one existing completed event private
 1. Confirm the turn was in scope and triggered Review. Absence of a completed event cannot distinguish a queued, running, canceled or never-scheduled run. Use live runtime evidence for those claims; do not infer them from this report.
 2. Check `relationPreparation`. For `skipped`, report its fixed reason and counts. A successful ordinary `skill_view` does not prove a registered source or eligible relation seed. Do not automatically register sources to make an audit pass.
 3. For `ready`, check both `relationReview.existing` and `.discovery`. Existing inspection may be `not-applicable` when the admitted manifest has no existing relations; discovery remains applicable. A discovery `no-change` result requires at least one nonempty search attempt. `relationSearchCount` includes failed attempts and does not prove successful retrieval.
-4. Distinguish a valid `nofinding` result from `subagent-error`, `parse-failed`, `schema-rejected` or `validation-failed`. If the reviewer fails at startup with `DataCloneError`, check that its build uses cloneable tool-binding descriptors. Ordinary tool success does not exercise this isolated Review boundary. Engineering details belong in [the relation graph contract](#skill-relation-graph).
+4. Distinguish a valid `nofinding` result from `subagent-error`, `parse-failed`, `schema-rejected` or `validation-failed`. Ordinary tool success does not exercise the isolated Review boundary. Engineering details belong in [the relation graph contract](#skill-relation-graph).
 5. Count actual relation changes from committed findings and graph receipts. Prepared snapshots document the evidence available before publication. A valid no-change run can leave graph bytes unchanged. It verifies that execution path, not positive create/update/delete publication or better task outcomes.
 
 Today's post-upgrade event is excluded from the report's complete-day comparison windows. Use retained cumulative observations or the specific private event for immediate verification, keeping the population and timestamps explicit. Do not manufacture relationships, run new model calls, edit state or restart Gateway as part of this report-only workflow.
@@ -529,10 +516,7 @@ node scripts/import-skill-relations.mjs classify --source /path/to/skills --data
 node scripts/import-skill-relations.mjs apply --source /path/to/skills --checkpoint /private/import-checkpoint.json --data-root /path/to/plugin-data
 ```
 
-Use the same data root, source registry and identity mode in every stage. A
-checkpoint classified with v1 hashed identities cannot be applied after switching
-the source to stable v2 bindings; do not spend classification requests before
-the target source registration is final.
+Use the same data root and source registry in every stage; do not spend classification requests before the target source registration is final.
 
 Preflight makes no model requests and reports unresolved targets and estimated
 request count. Sample classifies the first at most 20 relations in the importer's stable order; it is not a random or representative sample. Classify explicitly runs
@@ -574,7 +558,7 @@ Relation labels are `related`, `depends_on`, `composes_with`,
 tools but cannot seed expansion. Incoming `depends_on` means the other skill
 points to the current skill; never reverse its predicate.
 
-## Configuration migration and runtime acceptance
+## Runtime configuration and acceptance
 
 Keep lesser-used configuration aligned with `src/config.ts` and the manifest:
 name matching defaults to `maxEditDistance: 2`, `minJaccardScore: 0.5`, and an
@@ -586,27 +570,7 @@ configured fallback. Selection has no fallback retries. Audit `--days` accepts
 retained sessions normally cover about 14 days. Unsupported present schemas fail
 the audit. Absent sections are unavailable. Review reports separate skipped preparations from completed events. Only completed events contribute to outcome rates and last completion time.
 
-Before upgrading from experience-enabled versions, stop old writers during authorized maintenance and preserve private backups of settings, build, and `review.json`. Remove `routing.experiences` and the retired `review.triggers.experienceHealthCheck`, `review.triggers.intentHealthCheck`, `review.triggers.routingUncertainty`, `review.triggers.capabilityFit`, and `review.triggers.relationHealthCheck.enabled` settings. Set `review.triggers.relationHealthCheck.everyTurns` to retain a custom interval. Review requires a new schema-v9 log. Archive the older log outside its active path before enabling Review. A present unsupported log is rejected and preserved. The plugin performs no migration or cleanup of retired catalog or index data. Rollback requires restoring version-compatible configuration and Review history.
-
-Remove the entire legacy `instruction: { ... }` block from plugin configuration;
-there is no automatic migration or compatibility parser for this retired setting.
-
-Older deployments must retain mandatory `qmd.embedding` and `qmd.expansion`.
-Back up the previous build/configuration privately, then remove root plugin `jev`:
-there is no runtime alias, and the strict manifest rejects it. Explicitly move
-its QMD use to `qmd.jev` and independently configure `decisionModel` for plugin
-selection/manual import when needed. A configured host Decision model now takes
-precedence over the plugin endpoint. Validate host-only, plugin-only and combined
-configuration in an isolated profile; do not change live settings during tests.
-Rollback restores both the old build and its configuration shape without deleting
-runtime data, graph, databases, mappings, leases or telemetry. Remove retired
-`instruction`, `rerank`, and legacy routing fields; the compatibility parser does not override strict
-manifest rejection. Migrate native static selections into `skills.workingSet`
-and intentionally shared `skills.load.extraDirs` into `skills.sharedRoots`
-before enabling default startup normalization. Prepare configuration changes,
-preconditions, Gateway restart impact and rollback together; apply only within
-the user's authorized scope. Do not reset telemetry or delete indexes as a
-routine upgrade step.
+Required `qmd.embedding` and `qmd.expansion` fields are enforced by the strict manifest, alongside independent optional `qmd.jev` and plugin `decisionModel` endpoints (with a configured host Decision model taking precedence over plugin `decisionModel`). Validate configuration changes in an isolated profile before applying them; do not change live settings during tests. Keep native static selections in `skills.workingSet` and intentionally shared directories in `skills.sharedRoots` when default startup normalization is enabled. Prepare configuration changes, preconditions, Gateway restart impact and rollback together; apply only within the user's authorized scope. Do not reset telemetry or delete indexes as a routine maintenance step.
 
 Use `openclaw plugins inspect skill-harness --runtime --json` and
 `openclaw plugins doctor` for local registration/configuration diagnostics.
@@ -669,12 +633,20 @@ disables unknown-run fallback for that generation. Converting a legacy alias to
 a native fence retains its original budget allocation. Session cleanup reclaims
 owned entries; cross-session ambiguous aliases remain fenced until disposal.
 Disposal clears the request/admission ledgers; alias fences remain owned by the
-retired handler generation. Persist only the digest on the session row. Pre-upgrade native rows have no admission digest and cannot be matched by run alias or text. Preserve their history.
+retired handler generation. Persist only the digest on the session row. Pending
+native runs stage up to 8 attempts and 8 settlements per run ID while lookup or
+working-set preparation is in flight, protecting the keyless slot and verified
+effective key from speculative eviction. Keep non-host SDK/persisted keys
+alias-local through binding for independent replay lookups, while publishing
+verified host-key overrides synchronously to the shared admission owner before
+the first await. Use `hasActiveSession()` in Review's `isSystemActive` check so
+concurrent active turns keep Review deferred cleanly.
 
 ## Documentation boundaries
 
-The private project note is `~/productivity/projects/ai/skill-harness.md`
-(`/home/wei/productivity/projects/ai/skill-harness.md`). Write it for human
+The private project note is `/home/wei/.openclaw/workspace/darling/projects/ai/skill-harness.md`
+(`/mnt/gdrive/Productivity/projects/ai/skill-harness.md`, also aliased at
+`~/productivity/projects/ai/skill-harness.md`). Write it for human
 readers: retain the design background, architecture diagrams, key trade-offs,
 research context, user-facing behavior and configuration, current status,
 completed milestones, and explicitly agreed next actions. Organize and explain
@@ -717,6 +689,6 @@ Inventory and settled lifecycle diagnostics use safeErrorClassification() from s
 
 ## Remote-only QMD and loader validation
 
-QMD uses configured remote providers only; preserve BM25, CJK, AST, CLI and MCP without local inference or model downloads. Existing local settings and indexes remain readable for lexical search and diagnosis; vector conversion requires an explicit whole-database remote rebuild, never automatic identity adoption or deletion. Preserve existing remote provider ordering. The attempt-scoped `agent_end` hook captures durable metadata and flushes staged tool results. Only the execution owner’s settled lifecycle event closes the turn and starts statistics and Review preparation. Review execution loads after enabled/trigger checks and must recheck lifecycle cancellation, disposal and the originating turn after asynchronous preparation. Pipeline events stay synchronous. Keep operation diagnostics name-free.
+QMD uses configured remote providers only; preserve BM25, CJK, AST, CLI and MCP and remote provider ordering. The attempt-scoped `agent_end` hook captures durable metadata and flushes staged tool results. Only the execution owner’s settled lifecycle event (`api.agent.events.registerAgentEventSubscription`, `executionSettled === true` and not yielded-waiting) closes the turn and starts statistics and Review preparation. Review execution loads after enabled/trigger checks and must recheck lifecycle cancellation, disposal and the originating turn after asynchronous preparation. Pipeline events stay synchronous. Keep operation diagnostics name-free.
 
 Use `.github/scripts/measure-plugin-loader.mjs` only with independently installed tarballs and a private output directory. It creates isolated profiles for five timed fresh processes and one separate capacity process per build using the same Node/OpenClaw. Keep machine-specific timing and snapshot metrics outside the repository; CLI loader improvements do not establish whole-Gateway startup improvements. Never operate the live Gateway as part of this benchmark.
