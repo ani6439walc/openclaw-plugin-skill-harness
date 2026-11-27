@@ -59,6 +59,7 @@ import {
   resolveAvailableSkills,
   resolveSkillInventory,
 } from "../skills/index.js";
+import { resolveSkillRoots } from "../skills/roots.js";
 import { packageRoot } from "../file-utils.js";
 import { prepareRelationReviewContext } from "../review/relations.js";
 import type {
@@ -458,15 +459,27 @@ export function createHookHandlers(deps: HookDeps) {
         ]),
       ];
       try {
+        const resolvedNativeBundledSkillsDir = await nativeBundledSkillsDir;
+        const knownRoots =
+          typeof api.runtime?.agent?.resolveAgentWorkspaceDir === "function"
+            ? resolveSkillRoots({
+                api,
+                agentId: candidate.agentId,
+                bundledSkillsDir,
+                nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
+                sharedRoots: sharedRoots(),
+              })
+            : undefined;
         relationContext = await prepareRelationReviewContext({
           dataRoot: deps.dataRoot,
           seedNames,
+          knownRoots,
           getVisibleSkills: async () =>
             (deps.reviewSkillResolver ?? listAvailableSkills)({
               api,
               agentId: candidate.agentId,
               bundledSkillsDir,
-              nativeBundledSkillsDir: await nativeBundledSkillsDir,
+              nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
               sharedRoots: sharedRoots(),
               usageStats: {},
               cacheTtlMs: 0,

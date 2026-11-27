@@ -203,3 +203,75 @@ it("leaves an incompatible v8 log and graph intact before starting Review", asyn
   expect(await fs.readFile(graphPath, "utf8")).toBe("");
   expect(await fs.readFile(logPath, "utf8")).toBe(oldLog);
 });
+
+it("auto-registers unregistered seeds under resolved agent known roots during Review", async () => {
+  const workspaceDir = path.join(root, "agent-workspace");
+  const workspaceSkillsDir = path.join(workspaceDir, "skills");
+  const location = path.join(workspaceSkillsDir, "fresh-skill", "SKILL.md");
+  await fs.mkdir(path.dirname(location), { recursive: true });
+  await fs.writeFile(
+    location,
+    "---\nname: fresh-skill\ndescription: Freshly created skill\n---\nDocuments workflow.\n",
+  );
+  const skills = [
+    { name: "fresh-skill", location, description: "Freshly created skill" },
+  ];
+  let runner: Parameters<IntentReviewScheduler["setRunner"]>[0] | undefined;
+  const reviewer = vi.fn(async () => ({
+    findings: [],
+    outcome: "nofinding",
+    relationReview: { existing: "not-applicable", discovery: "no-change" },
+    relationSearchCount: 1,
+  }));
+  const writer = new IntentReviewLogWriter(root);
+  createHookHandlers({
+    api: {
+      config: {},
+      runtime: {
+        state: { resolveStateDir: () => path.join(root, "state") },
+        agent: { resolveAgentWorkspaceDir: () => workspaceDir },
+      },
+    } as unknown as OpenClawPluginApi,
+    config: () => resolveConfig({}),
+    refreshLiveConfigFromRuntime: () => {},
+    dataRoot: root,
+    reviewScheduler: {
+      setRunner: (value) => {
+        runner = value;
+      },
+      schedule: vi.fn(),
+      setOnDiscard: vi.fn(),
+    } as never,
+    reviewSkillResolver: vi.fn(async () => skills),
+    reviewer: reviewer as never,
+    reviewLogWriter: writer,
+  });
+
+  await runner!(
+    {
+      agentId: "main",
+      resolvedConfig: resolveConfig({}),
+      ctx: {},
+      modelRef: { provider: "test", model: "test" },
+      snapshot: {
+        sessionId: "s-auto",
+        eventId: "e-auto",
+        turnNumber: 10,
+        current: {
+          matchedSkills: ["fresh-skill"],
+          skillsUsed: [],
+          timestamps: { start: "2026-11-28T00:00:00Z" },
+        },
+        recent: [],
+      },
+    } as never,
+    new AbortController().signal,
+  );
+
+  expect(reviewer).toHaveBeenCalledTimes(1);
+  expect(reviewer.mock.calls[0][0]).toMatchObject({
+    relationContext: {
+      seedIds: [expect.stringMatching(/^local:[a-f0-9-]{36}:fresh-skill$/)],
+    },
+  });
+});

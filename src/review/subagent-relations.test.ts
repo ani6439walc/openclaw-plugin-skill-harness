@@ -194,6 +194,34 @@ it("builds a relation-only prompt with both assessment decisions", async () => {
   });
 });
 
+it("guides the reviewer to prefer specific relation types over generic related and refine broad related edges", async () => {
+  const { context } = await fixture();
+  const prompt = buildReviewPrompt(snapshot, context);
+  const typesLine = prompt
+    .split("\n")
+    .find((line) => line.startsWith("Types:"))!;
+  expect(typesLine).toBeDefined();
+  const orderedTypes = [
+    "depends_on",
+    "composes_with",
+    "specializes",
+    "conflicts_with",
+    "similar_to",
+    "related",
+  ] as const;
+  const positions = orderedTypes.map((type) => typesLine.indexOf(type));
+  for (let i = 0; i < positions.length; i += 1) {
+    expect(positions[i]).toBeGreaterThan(-1);
+    if (i > 0) expect(positions[i]).toBeGreaterThan(positions[i - 1]!);
+  }
+  expect(prompt).toContain("Prefer the most specific relation type");
+  expect(prompt).toContain("Treat related as a last resort");
+  expect(prompt).toContain("upgrading the edge to a more specific type");
+  expect(prompt).toContain(
+    "Helpful composition is composes_with, not depends_on",
+  );
+});
+
 it("stages only relation evidence and publishes a checked graph batch", async () => {
   const { context, response } = await fixture();
   const result = await run(context, async (workspace, prompt) => {

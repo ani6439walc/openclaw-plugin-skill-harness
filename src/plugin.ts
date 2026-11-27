@@ -22,6 +22,7 @@ import { createReviewToolRegistry } from "./review/tool-bindings.js";
 import { createBackgroundRunner } from "./subagent-runtime.js";
 import { createHookHandlers, type HookDeps } from "./hooks/index.js";
 import { listAvailableSkills, registerSkillTools } from "./skills/index.js";
+import { ensureKnownRelationSources } from "./skills/relation-sources.js";
 import {
   resolveOpenClawBundledSkillsDir,
   resolveSkillRoots,
@@ -155,6 +156,7 @@ export function createPlugin(
       const ownsBackgroundWork =
         api.registrationMode === undefined || api.registrationMode === "full";
       let disposed = false;
+      const backgroundAbortController = new AbortController();
       let refreshTimer: ReturnType<typeof setTimeout> | undefined;
       const runInBackgroundContext = createBackgroundRunner(api.lifecycle);
       const backgroundWork = new Set<Promise<void>>();
@@ -247,14 +249,33 @@ export function createPlugin(
               activeAgentIds()?.includes(normalizedAgentId) === false
             )
               return;
+            const skillRoots = resolveSkillRoots({
+              api: runtimeConfigApi,
+              agentId: normalizedAgentId,
+              nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
+              sharedRoots: config.skills.sharedRoots,
+            });
+            if (skills.length > 0 && skillRoots.length > 0) {
+              await ensureKnownRelationSources({
+                dataRoot,
+                skills,
+                roots: skillRoots,
+                signal: backgroundAbortController.signal,
+              }).catch((error: unknown) => {
+                if (!disposed && !backgroundAbortController.signal.aborted) {
+                  logger.warn(
+                    formatErrorDiagnostic(
+                      "failed to auto-register relation sources",
+                      error,
+                    ),
+                  );
+                }
+              });
+              if (disposed || backgroundAbortController.signal.aborted) return;
+            }
             qmdSkillIndex.schedule(normalizedAgentId, {
               skills,
-              sourceRoots: resolveSkillRoots({
-                api: runtimeConfigApi,
-                agentId: normalizedAgentId,
-                nativeBundledSkillsDir: resolvedNativeBundledSkillsDir,
-                sharedRoots: config.skills.sharedRoots,
-              }).map((root) => root.path),
+              sourceRoots: skillRoots.map((root) => root.path),
             });
           } catch (error: unknown) {
             logger.warn(
@@ -309,6 +330,13 @@ export function createPlugin(
       const stopBackgroundWork = (): Promise<void> => {
         if (stopping) return stopping;
         disposed = true;
+        if (!backgroundAbortController.signal.aborted) {
+          backgroundAbortController.abort(
+            api.lifecycle?.signal?.aborted
+              ? api.lifecycle.signal.reason
+              : undefined,
+          );
+        }
         api.lifecycle?.signal?.removeEventListener("abort", onLifecycleAbort);
         if (refreshTimer !== undefined) {
           clearTimeout(refreshTimer);

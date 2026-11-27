@@ -5,7 +5,35 @@ import {
   resolveStateDirFromApi,
 } from "../file-utils.js";
 import { resolveRelationGraph } from "./relation-graph.js";
+import type { RelationType } from "./relation-graph.js";
 import type { AvailableSkill, RelatedSkillResult } from "./types.js";
+
+const relationTypePriority = new Map<RelationType, number>([
+  ["depends_on", 0],
+  ["composes_with", 1],
+  ["specializes", 2],
+  ["conflicts_with", 3],
+  ["similar_to", 4],
+  ["related", 5],
+]);
+
+function compareRelationEdges(
+  a: RelatedSkillResult,
+  b: RelatedSkillResult,
+): number {
+  const typeOrder =
+    (relationTypePriority.get(a.relation_type) ?? Number.MAX_SAFE_INTEGER) -
+    (relationTypePriority.get(b.relation_type) ?? Number.MAX_SAFE_INTEGER);
+  const sourceOrder =
+    (a.source === "review" ? 0 : 1) - (b.source === "review" ? 0 : 1);
+  return (
+    typeOrder ||
+    sourceOrder ||
+    a.name.localeCompare(b.name) ||
+    a.direction.localeCompare(b.direction) ||
+    a.relation_type.localeCompare(b.relation_type)
+  );
+}
 
 export function relatedSkillsBySkillName(
   skills: readonly AvailableSkill[],
@@ -56,7 +84,7 @@ export function expandRelatedCandidates(
           edge.reason.trim() &&
           canonicalIdentity(edge.name) !== canonicalIdentity(skill.name),
       )
-      .sort((a, b) => a.name.localeCompare(b.name)),
+      .sort(compareRelationEdges),
   }));
   // Each pass gives each seed at most one new target. Duplicate targets cost no quota.
   let progressed = true;
@@ -128,12 +156,7 @@ export function collectRelationEvidence(
           edge.reason.trim() &&
           canonicalIdentity(edge.name) !== canonicalIdentity(current.name),
       )
-      .sort(
-        (a, b) =>
-          a.name.localeCompare(b.name) ||
-          a.direction.localeCompare(b.direction) ||
-          a.relation_type.localeCompare(b.relation_type),
-      )
+      .sort(compareRelationEdges)
       .flatMap((edge) => {
         const other = visible.get(canonicalIdentity(edge.name));
         if (!other) return [];

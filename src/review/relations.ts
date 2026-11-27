@@ -4,7 +4,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { canonicalIdentity } from "../normalize.js";
 import type { AvailableSkill } from "../skills/types.js";
 import { resolveConfinedFile } from "../skills/paths.js";
-import { readRelationSources } from "../skills/relation-sources.js";
+import {
+  ensureKnownRelationSources,
+  inspectRelationSources,
+  readRelationSources,
+  type KnownRelationRoot,
+} from "../skills/relation-sources.js";
 import {
   applyRelationReviewChanges,
   readRelationGraph,
@@ -90,6 +95,7 @@ export async function prepareRelationReviewContext(params: {
   dataRoot: string;
   seedNames: readonly string[];
   getVisibleSkills: () => Promise<readonly AvailableSkill[]>;
+  knownRoots?: readonly KnownRelationRoot[];
   getNeighborOffset?: (key: string) => number;
   onPreparation?: (summary: RelationPreparationSummary) => void;
   signal?: AbortSignal;
@@ -112,7 +118,16 @@ export async function prepareRelationReviewContext(params: {
     return undefined;
   };
   if (!requestedSeeds.length) return skip("no-seeds");
-  if (!readRelationSources(params.dataRoot))
+  const hasKnownRoots = Boolean(params.knownRoots?.length);
+  const initialRegistry = await inspectRelationSources(
+    params.dataRoot,
+    params.signal,
+  );
+  checkActive();
+  if (
+    initialRegistry.status === "invalid" ||
+    (initialRegistry.status === "missing" && !hasKnownRoots)
+  )
     return skip("registry-unavailable");
   const initialWinners = visibleWinners(await params.getVisibleSkills());
   checkActive();
@@ -121,17 +136,29 @@ export async function prepareRelationReviewContext(params: {
   const relations: GraphRelation[] = [];
   const relationRevisions = new Map<string, string>();
   let bytes = 0;
+  let registryFailed = false;
 
   async function captureSnapshot(
     name: string,
     winners: ReadonlyMap<string, AvailableSkill>,
   ): Promise<RelationSkillAdmission> {
     checkActive();
+    let registryState = await inspectRelationSources(
+      params.dataRoot,
+      params.signal,
+    );
+    checkActive();
+    if (
+      registryState.status === "invalid" ||
+      (registryState.status === "missing" && !hasKnownRoots)
+    ) {
+      registryFailed = true;
+      return { status: "ineligible", reason: "registry-unavailable" };
+    }
+    let registry =
+      registryState.status === "valid" ? registryState.registry : undefined;
     const skill = winners.get(canonicalIdentity(name));
     if (!skill) return { status: "ineligible", reason: "not-visible" };
-    const registry = readRelationSources(params.dataRoot);
-    if (!registry)
-      return { status: "ineligible", reason: "registry-unavailable" };
     try {
       const file = await resolveConfinedFile(
         path.dirname(skill.location),
@@ -150,8 +177,38 @@ export async function prepareRelationReviewContext(params: {
         return { status: "ineligible", reason: "file-too-large" };
       if (bytes + size > MAX_SNAPSHOT_BYTES)
         return { status: "ineligible", reason: "evidence-budget" };
-      const identity = await readSkillIdentity(skill, registry);
+      let identity = registry
+        ? await readSkillIdentity(skill, registry)
+        : undefined;
       checkActive();
+      if (!identity?.source_id && params.knownRoots?.length) {
+        const synced = await ensureKnownRelationSources({
+          dataRoot: params.dataRoot,
+          skills: [skill],
+          roots: params.knownRoots,
+          signal: params.signal,
+        });
+        checkActive();
+        if (!synced) {
+          registryFailed = true;
+          return { status: "ineligible", reason: "registry-unavailable" };
+        }
+        registryState = await inspectRelationSources(
+          params.dataRoot,
+          params.signal,
+        );
+        checkActive();
+        if (registryState.status === "invalid") {
+          registryFailed = true;
+          return { status: "ineligible", reason: "registry-unavailable" };
+        }
+        registry =
+          registryState.status === "valid" ? registryState.registry : undefined;
+        identity = registry
+          ? await readSkillIdentity(skill, registry)
+          : undefined;
+        checkActive();
+      }
       if (!identity?.source_id)
         return { status: "ineligible", reason: "unregistered" };
       const after = await fs.readFile(file, "utf8");
@@ -188,7 +245,8 @@ export async function prepareRelationReviewContext(params: {
     } else preparation.skippedCaptureCount++;
   }
   preparation.capturedSeeds = seedIds.size;
-  if (!seedIds.size) return skip("no-eligible-seeds");
+  if (!seedIds.size)
+    return skip(registryFailed ? "registry-unavailable" : "no-eligible-seeds");
   const graph = await readRelationGraph(params.dataRoot);
   checkActive();
   // Initial seed pairs are fixed at preparation time, including tombstones.

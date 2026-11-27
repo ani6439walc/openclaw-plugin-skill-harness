@@ -35,6 +35,75 @@ describe("declared relation candidates", () => {
     expect(evidence[0]).not.toHaveProperty("verification_status");
   });
 
+  it.each([
+    ["depends_on", "composes_with"],
+    ["composes_with", "specializes"],
+    ["specializes", "conflicts_with"],
+    ["conflicts_with", "similar_to"],
+    ["similar_to", "related"],
+  ] as const)(
+    "ranks %s before %s under the two-target cap",
+    (higher, lower) => {
+      const anchor = skill("anchor");
+      const edges = [
+        edge("zulu", { relation_type: higher }),
+        edge("beta", { relation_type: "related" }),
+        edge("alpha", { relation_type: lower }),
+        edge("gamma", { relation_type: "related" }),
+      ];
+      const visible = [anchor, ...edges.map(({ name }) => skill(name))];
+      const graph = new Map([[anchor.name, edges]]);
+
+      expect(expandRelatedCandidates([anchor], visible, graph).added).toEqual([
+        "zulu",
+        "alpha",
+      ]);
+    },
+  );
+
+  it("prioritizes Review provenance within a type and relation type across sources", () => {
+    const anchor = skill("anchor");
+    const edges = [
+      edge("alpha-related", { relation_type: "related", source: "review" }),
+      edge("beta-imported"),
+      edge("gamma-legacy", { source: undefined }),
+      edge("zulu-reviewed", { source: "review" }),
+    ];
+    const visible = [anchor, ...edges.map(({ name }) => skill(name))];
+    const graph = new Map([[anchor.name, edges]]);
+
+    expect(expandRelatedCandidates([anchor], visible, graph).added).toEqual([
+      "zulu-reviewed",
+      "beta-imported",
+    ]);
+  });
+
+  it("keeps the two highest-priority edges from a seed as evidence for an existing target", () => {
+    const candidates = [skill("anchor"), skill("target")];
+    const graph = new Map([
+      [
+        "anchor",
+        [
+          edge("target", {
+            relation_type: "related",
+            source: "review",
+            reason: "Related",
+          }),
+          edge("target", { reason: "Imported dependency" }),
+          edge("target", { source: "review", reason: "Reviewed dependency" }),
+        ],
+      ],
+    ]);
+
+    const result = expandRelatedCandidates(candidates, candidates, graph);
+
+    expect(result.added).toEqual([]);
+    expect(result.evidence.map(({ reason }) => reason)).toEqual([
+      "Reviewed dependency",
+      "Imported dependency",
+    ]);
+  });
+
   it("uses canonical identities for graph lookup, targets, self edges and duplicates", () => {
     const anchor = skill("Ａ");
     const existing = skill("Ｂ");
@@ -150,6 +219,29 @@ describe("declared relation candidates", () => {
 });
 
 describe("relation relevance evidence", () => {
+  it("prioritizes relation type and Review provenance across both directions under the two-relation cap", () => {
+    const anchor = skill("anchor");
+    const edges = [
+      edge("alpha-related", { relation_type: "related", source: "review" }),
+      edge("beta-imported", {
+        relation_type: "composes_with",
+        direction: "related-to-current",
+      }),
+      edge("delta-dependency", { direction: "related-to-current" }),
+      edge("zulu-reviewed", {
+        relation_type: "composes_with",
+        source: "review",
+      }),
+    ];
+    const visible = [anchor, ...edges.map(({ name }) => skill(name))];
+    const graph = new Map([[anchor.name, edges]]);
+
+    expect(collectRelationEvidence([anchor], visible, graph)).toMatchObject([
+      { from: "delta-dependency", to: "anchor", relation_type: "depends_on" },
+      { from: "anchor", to: "zulu-reviewed", relation_type: "composes_with" },
+    ]);
+  });
+
   it("resolves NFKC and trimmed identities while preserving names and direction", () => {
     const anchor = skill("Ａ");
     const target = skill("Ｂ");

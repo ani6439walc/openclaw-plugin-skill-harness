@@ -2,7 +2,10 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { registerRelationSource } from "../skills/relation-sources.js";
+import {
+  registerRelationSource,
+  relationSourcesPath,
+} from "../skills/relation-sources.js";
 import {
   appendImportedRelations,
   readRelationGraph,
@@ -615,4 +618,267 @@ it("advances past failed existing-neighbor captures on the next inspection", asy
   expect(second.skills.some(({ name }) => firstNames.includes(name))).toBe(
     false,
   );
+});
+
+it("auto-registers unregistered seeds and discovered skills inside knownRoots while rejecting unknown roots", async () => {
+  const knownRoot = path.join(root, "workspace-skills");
+  const unknownRoot = path.join(root, "unknown-skills");
+  const makeSkill = async (dir: string, name: string) => {
+    const location = path.join(dir, name, "SKILL.md");
+    await fs.mkdir(path.dirname(location), { recursive: true });
+    await fs.writeFile(
+      location,
+      `---\nname: ${name}\ndescription: Workflow ${name}.\n---\n${name} provides pipeline data.\n`,
+    );
+    return { name, location, description: `Workflow ${name}.` };
+  };
+  const seed = await makeSkill(knownRoot, "seed-skill");
+  const discovered = await makeSkill(knownRoot, "discovered-skill");
+  const rogue = await makeSkill(unknownRoot, "rogue-skill");
+  const visible = [seed, discovered, rogue];
+
+  // No sources.json exists initially; knownRoots lets Review auto-register seeds and extras.
+  const context = await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: [seed.name],
+    getVisibleSkills: async () => visible,
+    knownRoots: [{ path: knownRoot, source: "workspace" }],
+  });
+  expect(context).toBeDefined();
+  expect(context!.skills).toHaveLength(1);
+  expect(context!.skills[0].identity.id).toMatch(
+    /^local:[a-f0-9-]{36}:seed-skill$/,
+  );
+
+  const admitted = await context!.admitSkill(discovered.name);
+  expect(admitted.status).toBe("eligible");
+  expect(await context!.admitSkill(rogue.name)).toEqual({
+    status: "ineligible",
+    reason: "unregistered",
+  });
+
+  // Auto-registered endpoints can publish verified relations to graph.jsonl.
+  const receipt = await applyPreparedRelationReview(
+    context!,
+    [finding(context!)],
+    "auto-reg-event",
+    "main",
+  );
+  expect(receipt.changed).toBe(1);
+  expect((await readRelationGraph(root))!.relations).toHaveLength(1);
+});
+
+it("reloads the registry after concurrent zero-write syncs so simultaneous Reviews both succeed", async () => {
+  const knownRoot = path.join(root, "concurrent-skills");
+  const makeSkill = async (name: string) => {
+    const location = path.join(knownRoot, name, "SKILL.md");
+    await fs.mkdir(path.dirname(location), { recursive: true });
+    await fs.writeFile(
+      location,
+      `---\nname: ${name}\ndescription: Workflow ${name}.\n---\n${name} body.\n`,
+    );
+    return { name, location, description: `Workflow ${name}.` };
+  };
+  const sharedSeed = await makeSkill("shared-seed");
+  const sharedExtra = await makeSkill("shared-extra");
+  const visible = [sharedSeed, sharedExtra];
+  const knownRoots = [{ path: knownRoot, source: "workspace" as const }];
+
+  const [ctxA, ctxB] = await Promise.all([
+    prepareRelationReviewContext({
+      dataRoot: root,
+      seedNames: [sharedSeed.name],
+      getVisibleSkills: async () => visible,
+      knownRoots,
+    }),
+    prepareRelationReviewContext({
+      dataRoot: root,
+      seedNames: [sharedSeed.name],
+      getVisibleSkills: async () => visible,
+      knownRoots,
+    }),
+  ]);
+  expect(ctxA).toBeDefined();
+  expect(ctxB).toBeDefined();
+  expect(ctxA!.seedIds).toEqual(ctxB!.seedIds);
+
+  const [admitA, admitB] = await Promise.all([
+    ctxA!.admitSkill(sharedExtra.name),
+    ctxB!.admitSkill(sharedExtra.name),
+  ]);
+  expect(admitA.status).toBe("eligible");
+  expect(admitB.status).toBe("eligible");
+  if (admitA.status === "eligible" && admitB.status === "eligible") {
+    expect(admitA.skill.identity.id).toBe(admitB.skill.identity.id);
+  }
+});
+
+it("reports registry-unavailable up front for corrupt, symlinked, or missing-with-graph registries even with knownRoots and no visible seeds", async () => {
+  const knownRoot = path.join(root, "known-skills");
+  const location = path.join(knownRoot, "valid-skill", "SKILL.md");
+  await fs.mkdir(path.dirname(location), { recursive: true });
+  await fs.writeFile(
+    location,
+    "---\nname: valid-skill\ndescription: Valid.\n---\nBody.\n",
+  );
+  const visible = [{ name: "valid-skill", location, description: "Valid." }];
+  const knownRoots = [{ path: knownRoot, source: "workspace" as const }];
+
+  // 1. Corrupt sources.json with no visible seeds -> registry-unavailable (not no-eligible-seeds).
+  const corruptRoot = path.join(root, "corrupt-data");
+  const corruptSources = relationSourcesPath(corruptRoot);
+  await fs.mkdir(path.dirname(corruptSources), { recursive: true });
+  await fs.writeFile(corruptSources, "{broken");
+  const onCorrupt = vi.fn();
+  expect(
+    await prepareRelationReviewContext({
+      dataRoot: corruptRoot,
+      seedNames: ["invisible-seed"],
+      getVisibleSkills: async () => visible,
+      knownRoots,
+      onPreparation: onCorrupt,
+    }),
+  ).toBeUndefined();
+  expect(onCorrupt).toHaveBeenLastCalledWith(
+    expect.objectContaining({ reason: "registry-unavailable" }),
+  );
+
+  // 2. Symlinked sources.json with no visible seeds -> registry-unavailable.
+  const symlinkRoot = path.join(root, "symlink-data");
+  const symlinkSources = relationSourcesPath(symlinkRoot);
+  const externalSources = path.join(root, "external.json");
+  await fs.writeFile(
+    externalSources,
+    JSON.stringify({ version: 1, sources: [] }),
+  );
+  await fs.mkdir(path.dirname(symlinkSources), { recursive: true });
+  await fs.symlink(externalSources, symlinkSources);
+  const onSymlink = vi.fn();
+  expect(
+    await prepareRelationReviewContext({
+      dataRoot: symlinkRoot,
+      seedNames: ["invisible-seed"],
+      getVisibleSkills: async () => visible,
+      knownRoots,
+      onPreparation: onSymlink,
+    }),
+  ).toBeUndefined();
+  expect(onSymlink).toHaveBeenLastCalledWith(
+    expect.objectContaining({ reason: "registry-unavailable" }),
+  );
+
+  // 3. Missing sources.json alongside existing stable-ID graph.jsonl -> registry-unavailable and no new UUID minted.
+  const partialRoot = path.join(root, "partial-restore");
+  const graphFile = relationGraphPath(partialRoot);
+  await fs.mkdir(path.dirname(graphFile), { recursive: true });
+  await fs.writeFile(
+    graphFile,
+    `${JSON.stringify({
+      op: "create",
+      entity: {
+        id: "local:22222222-2222-4222-8222-222222222222:valid-skill",
+        type: "Skill",
+        properties: {
+          name: "valid-skill",
+          source_id: "local:22222222-2222-4222-8222-222222222222",
+          skill_key: "valid-skill",
+          source_path: "valid-skill/SKILL.md",
+          formatVersion: 2,
+        },
+      },
+    })}\n`,
+  );
+  const onPartial = vi.fn();
+  expect(
+    await prepareRelationReviewContext({
+      dataRoot: partialRoot,
+      seedNames: ["valid-skill"],
+      getVisibleSkills: async () => visible,
+      knownRoots,
+      onPreparation: onPartial,
+    }),
+  ).toBeUndefined();
+  expect(onPartial).toHaveBeenLastCalledWith(
+    expect.objectContaining({ reason: "registry-unavailable" }),
+  );
+  await expect(fs.stat(relationSourcesPath(partialRoot))).rejects.toThrow();
+
+  // 4. Peer publishes sources.json + stable-ID graph between initial miss and graph check -> Review still becomes ready.
+  const raceRoot = path.join(root, "race-publish");
+  const raceSources = relationSourcesPath(raceRoot);
+  const raceGraph = relationGraphPath(raceRoot);
+  const realKnownRoot = await fs.realpath(knownRoot);
+  const raceSourceId = "local:44444444-4444-4444-8444-444444444444";
+  await fs.mkdir(path.dirname(raceSources), { recursive: true });
+  const realLstat = fs.lstat.bind(fs);
+  let injectedMiss = false;
+  const lstatSpy = vi
+    .spyOn(fs, "lstat")
+    .mockImplementation(async (targetPath, ...rest) => {
+      if (!injectedMiss && String(targetPath) === raceSources) {
+        injectedMiss = true;
+        await fs.writeFile(
+          raceSources,
+          JSON.stringify(
+            {
+              version: 1,
+              sources: [
+                {
+                  id: raceSourceId,
+                  root: realKnownRoot,
+                  skills: {
+                    "valid-skill": {
+                      name: "valid-skill",
+                      source_path: "valid-skill/SKILL.md",
+                    },
+                  },
+                },
+              ],
+            },
+            null,
+            2,
+          ),
+          { mode: 0o600 },
+        );
+        await fs.writeFile(
+          raceGraph,
+          `${JSON.stringify({
+            op: "create",
+            entity: {
+              id: `${raceSourceId}:valid-skill`,
+              type: "Skill",
+              properties: {
+                name: "valid-skill",
+                source_id: raceSourceId,
+                skill_key: "valid-skill",
+                source_path: "valid-skill/SKILL.md",
+                formatVersion: 2,
+              },
+            },
+          })}\n`,
+        );
+        const err = new Error("ENOENT") as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        throw err;
+      }
+      return realLstat(targetPath, ...rest);
+    });
+
+  try {
+    const onRace = vi.fn();
+    const racedContext = await prepareRelationReviewContext({
+      dataRoot: raceRoot,
+      seedNames: ["valid-skill"],
+      getVisibleSkills: async () => visible,
+      knownRoots,
+      onPreparation: onRace,
+    });
+    expect(racedContext).toBeDefined();
+    expect(racedContext!.seedIds).toEqual([`${raceSourceId}:valid-skill`]);
+    expect(onRace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "ready", capturedSeeds: 1 }),
+    );
+  } finally {
+    lstatSpy.mockRestore();
+  }
 });

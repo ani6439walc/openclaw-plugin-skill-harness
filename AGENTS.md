@@ -142,13 +142,18 @@ The parent stages confined full `SKILL.md` snapshots (256 KiB per file, 2 MiB
 total). Relation proposals must cite exact line ranges/quotes from both endpoints,
 touch an original seed and stay inside the parent-admitted manifest. Skill content can
 justify changes without an execution trial; recommendation/search scores or
-co-loading alone cannot. Require explicit necessity for `depends_on`; deletion
-requires contradiction, duplication or supersession, not lack of usage or search
-hits. Do not introduce confidence levels or restore verification-status fields.
+co-loading alone cannot. Prefer specific documented types (`depends_on`,
+`composes_with`, `specializes`, `conflicts_with`, `similar_to`) over generic
+`related`, treat `related` as a last resort, and upgrade overly broad existing
+`related` edges when both endpoints support a narrower predicate. Require
+explicit necessity for `depends_on` (do not stretch `composes_with` into
+`depends_on`); deletion requires contradiction, duplication or supersession,
+not lack of usage or search hits. Do not introduce confidence levels or restore
+verification-status fields.
 
 Prepare at most four existing-neighbor attempts, rotating a sorted neighbor list with a persisted cursor keyed by the captured seed-ID group. Keep at most 256 cursor entries in `review.json`; advance only in the same locked atomic write as a new event. This rotates preparation, not proven model attention, and does not guarantee coverage when groups or catalogs change. Do not derive cursors from unbounded event history.
 
-Discovery belongs to the reviewer: at most four `skill_search` calls per run, then `skill_view` admits chosen visible registered endpoints under the shared eight-extra-attempt budget. Preserve failed-attempt accounting, repeated-read snapshot identity, and 256 KiB/file plus 2 MiB aggregate evidence limits. Admission must serialize, check cancellation around I/O, and capture new pair revisions without refreshing previously observed pairs. Support files and ineligible reads are not relation evidence; no automatic source registration occurs.
+Discovery belongs to the reviewer: at most four `skill_search` calls per run, then `skill_view` admits chosen visible registered endpoints under the shared eight-extra-attempt budget. Preserve failed-attempt accounting, repeated-read snapshot identity, and 256 KiB/file plus 2 MiB aggregate evidence limits. Admission must serialize, check cancellation around I/O, and capture new pair revisions without refreshing previously observed pairs. Support files and ineligible reads are not relation evidence; unregistered skills inside the agent's known OpenClaw skill roots (`resolveSkillRoots`) are auto-registered into `sources.json`, while skills outside known roots remain ineligible without allocating identities.
 
 Use public run `toolBindings` with only a structured-cloneable descriptor (version, random token, and exact agent/session identity). The host clones and fingerprints these values: never transport callback functions. Keep callbacks in a registry owned by one plugin registration and inject that same registry through hooks/runner and registered tools. Validate descriptor ownership and registry membership; reject unknown, cross-registration or closed bindings without a normal-tool fallback. Keep lifetime authority in the origin closure and close the registry during plugin disposal. Close admission and drain accepted work before validation or workspace cleanup. Review `skill_view` bypasses usage writes and marks results `review_inspection`; adoption extraction rejects that marker. Normal tool behavior remains unchanged. Do not depend on tool hooks receiving `toolBindings`.
 
@@ -189,7 +194,7 @@ its writer participates in plugin locking or enforces plugin validation.
 Relation expansion and relation scoring are always active when usable graph
 evidence exists; there is no enable switch. Expand only outgoing declarations from the first
 8 ranked original name/QMD candidates, one hop, round-robin, at most 2 new
-skills per seed and 8 per turn; alphabetize targets and do not charge duplicates.
+skills per seed and 8 per turn. Count only newly added targets toward those limits.
 Require current visible winning identities and a nonempty original reason.
 Use canonicalIdentity() for graph/visibility lookups, expansion deduplication
 and self comparisons; preserve original names in output.
@@ -201,11 +206,20 @@ new skill selection thresholds or fallback injection. `relatedCandidates` is opt
 session/event diagnostics; `related-declared` injection contributes to pool
 counts only, never QMD or collection attribution. Do not recalculate old stats.
 
+Both expansion and relevance scoring prioritize `depends_on`, `composes_with`,
+`specializes`, `conflicts_with`, `similar_to`, and `related` in that order.
+Unrecognized types rank last. Within the same type,
+Review provenance comes before author imports and unspecified sources. Break
+remaining ties with locale comparison of the neighbor name, direction, then
+relation type. Apply this order within each expansion seed or scoring candidate
+before enforcing its limits.
+
 Collect relation relevance evidence independently
 from candidate expansion: at most two incoming/outgoing relations per candidate,
-16 questions total, preserving original `from`/`to`. Anchor each relation to the
-candidate being described. Both endpoints require current visible winning
-identities and a nonempty author reason; include each endpoint's name and
+16 questions total, distributed round-robin across candidates. Preserve the
+original `from`/`to` and anchor each relation to the candidate being described.
+Both endpoints require current visible winning
+identities and a nonempty relation reason. Include each endpoint's name and
 bounded description (1,000 code points) even if the other endpoint is not a
 candidate. That background endpoint does not become a candidate, receive its own
 skill question, or consume an injection slot. Reasons are bounded to 500 code
@@ -214,8 +228,8 @@ points. All six predicates remain unverified advisory evidence.
 The Decision state carries `skill_candidates` with name, description, discovery sources and relation IDs. `skill_relation_evidence` provides the corresponding question ID (`relation_0`, etc.), anchor, direction and bounded endpoint evidence. Questions reference their state entries. Noncandidate endpoints provide background. Each skill receives its own independent selection score.
 
 Score relation reference value for the current task in the existing single Decision
-call, separately from skill relevance. Use the author reason and both endpoint
-descriptions; author declarations remain unverified reference data, not instructions.
+call, separately from skill relevance. Use the relation reason and both endpoint
+descriptions; relation declarations remain unverified reference data, not instructions.
 Do not score a relation as a prerequisite-verification or unmet-necessity test.
 Keep skill candidate guidance and its no-co-loading boundary unchanged.
 Render only relations scoring at least routing.skills.related.relevanceThreshold
@@ -236,20 +250,38 @@ Stable relation identity uses `source_id` plus an immutable `skill_key`; it must
 not include the current filesystem path or content fingerprint. GitHub source
 IDs use `github:owner/repository`; self-hosted Git includes its host. Standalone
 local collections receive one persistent `local:<UUID>` source ID through
-explicit registration, with mutable human labels kept separate. Placement
+explicit registration or automatic registration of known OpenClaw skill roots,
+with mutable human labels kept separate. Placement
 categories (`workshop`, `workspace`, `managed`, etc.) are not origin identity.
 Known remote provenance survives local installation; unknown copies must not be
 merged by name, matching contents or a guessed Git origin.
 
 The private `skill-relations/sources.json` registry owns source-root bindings
 and each immutable key's current name and relative `source_path` under that
-registered root. Readers do
-not create UUIDs, bindings or sidecars. Registration, explicit rebind/rename,
+registered root. Pure readers (`readRelationSources`, `resolveRelationSource`) do
+not create UUIDs, bindings or sidecars. Full-registration skill refreshes and
+Review preparation/admission with resolved known OpenClaw skill roots
+(`resolveSkillRoots`) may auto-register unregistered valid skills under those
+known roots via `ensureKnownRelationSources`, reusing each root's existing
+`local:<UUID>` (or allocating one per root only on a fresh install or an
+existing valid registry), parsing skill frontmatter as inert YAML only,
+validating full eligibility before acquiring the lock so ineligible skills do
+not create `skill-relations/`, never duplicating already-bound
+physical files (such as `github:*` bindings or symlink aliases), never
+overwriting/renaming/removing existing bindings, publishing `sources.json`
+atomically with mode `0600` already set before rename, honoring cancellation
+right before synchronous publication (including stop-owned cancellation on
+`gateway_stop`), and failing closed on corrupt, symlinked, or missing-with-existing-graph
+registries. Review distinguishes missing vs. invalid registry state up front
+and reloads the registry after every successful sync (including concurrent
+zero-write no-ops). Registration, explicit rebind/rename,
 and graph publication share the graph lock; missing, invalid or ambiguous
 bindings fail open without borrowing another source's relations. Only current
 visible winning skills may resolve graph endpoints. Back up the registry with
 graph/schema and preserve it during host moves; losing it does not authorize
-regenerating local identities or guessing that matching names share lineage.
+regenerating local identities or guessing that matching names share lineage
+(automatic bootstrap refuses to mint new local UUIDs when `sources.json` is
+absent alongside an existing stable-ID `graph.jsonl`).
 Removing a skill from a registration input does not delete its binding. Use
 explicit `removeKeys` to retire deleted source entries before a complete catalog
 rebuild, preserving the collection ID and every remaining immutable key.

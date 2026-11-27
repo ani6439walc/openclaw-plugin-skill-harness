@@ -15,6 +15,7 @@ import {
   packageRoot,
   readJsonFile,
   readProcessStartTime,
+  withFileLock,
   writeJsonAtomic,
 } from "./file-utils.js";
 
@@ -238,6 +239,46 @@ describe("atomic JSON writes", () => {
     try {
       expect(() => writeJsonAtomic(filePath, { status: "ready" })).toThrow();
       expect(fs.readdirSync(tempDir)).toEqual(["session.json"]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("applies private file mode atomically before rename and respects abort signals", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-utils-mode-"));
+    const filePath = path.join(tempDir, "sources.json");
+
+    try {
+      writeJsonAtomic(filePath, { version: 1 }, { mode: 0o600 });
+      expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+
+      const aborted = new AbortController();
+      aborted.abort();
+      const canceledPath = path.join(tempDir, "canceled.json");
+      expect(() =>
+        writeJsonAtomic(
+          canceledPath,
+          { version: 1 },
+          { mode: 0o600, signal: aborted.signal },
+        ),
+      ).toThrow();
+      expect(fs.existsSync(canceledPath)).toBe(false);
+      expect(fs.readdirSync(tempDir)).toEqual(["sources.json"]);
+
+      const lockTarget = path.join(tempDir, "graph.jsonl");
+      const holder = new FileLock(lockTarget);
+      expect(await holder.acquire()).toBe(true);
+      const waitAbort = new AbortController();
+      setTimeout(() => waitAbort.abort(), 15);
+      const startedAt = performance.now();
+      await expect(
+        withFileLock(lockTarget, async () => "never", {
+          maxWaitMs: 5_000,
+          signal: waitAbort.signal,
+        }),
+      ).rejects.toThrow();
+      expect(performance.now() - startedAt).toBeLessThan(1_000);
+      holder.release();
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

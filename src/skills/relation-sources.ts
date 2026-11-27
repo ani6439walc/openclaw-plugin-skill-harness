@@ -1,11 +1,13 @@
 import { lstatSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-import matter from "gray-matter";
+import { createHash, randomUUID } from "node:crypto";
 import { readJsonFile, withFileLock, writeJsonAtomic } from "../file-utils.js";
 import { canonicalIdentity } from "../normalize.js";
+import { parseInertYamlFrontmatter } from "./frontmatter.js";
 import { resolveConfinedFile } from "./paths.js";
+import { replayRelationGraph } from "./relation-graph.js";
+import type { SkillSource } from "./types.js";
 
 export interface RelationSourceBinding {
   name: string;
@@ -262,7 +264,11 @@ export async function resolveRelationSource(
   }
 }
 
-/** Explicit registration is the only operation allowed to allocate a local UUID. */
+/**
+ * Explicit registration allocates or updates a source binding. Pure readers
+ * never allocate local UUIDs, and automatic bootstrap is limited to
+ * `ensureKnownRelationSources` under known OpenClaw skill roots.
+ */
 export async function registerRelationSource(
   dataRoot: string,
   input: RegisterRelationSourceInput,
@@ -371,7 +377,9 @@ export async function registerRelationSource(
       )) {
         const file = await bindingFile(source, binding);
         if (!file) fail();
-        const parsed = matter(await fs.readFile(file, "utf8"));
+        const parsed = parseInertYamlFrontmatter(
+          await fs.readFile(file, "utf8"),
+        );
         if (
           typeof parsed.data.name !== "string" ||
           parsed.data.name.trim() !== binding.name ||
@@ -385,11 +393,563 @@ export async function registerRelationSource(
           fail();
       }
       next.sources.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      writeJsonAtomic(relationSourcesPath(dataRoot), next);
-      await fs.chmod(relationSourcesPath(dataRoot), 0o600);
+      writeJsonAtomic(relationSourcesPath(dataRoot), next, { mode: 0o600 });
       return next.sources.find((entry) => entry.id === id)!;
     },
   );
   if (!result) throw new Error("Skill relation graph is busy");
   return result;
+}
+
+export interface KnownRelationRoot {
+  path: string;
+  source?: SkillSource;
+  label?: string;
+}
+
+export interface EnsureKnownRelationSourcesParams {
+  dataRoot: string;
+  skills: readonly { name: string; location: string; source?: SkillSource }[];
+  roots: readonly KnownRelationRoot[];
+  signal?: AbortSignal;
+}
+
+export interface EnsureKnownRelationSourcesResult {
+  registeredCount: number;
+  createdSourceIds: string[];
+}
+
+interface ResolvedKnownRoot {
+  logicalRoot: string;
+  realRoot: string;
+  source?: SkillSource;
+  label?: string;
+}
+
+const syncQueues = new Map<string, Promise<void>>();
+
+function enqueueRelationSourceSync<T>(
+  dataRoot: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const key = path.resolve(dataRoot);
+  const previous = syncQueues.get(key) ?? Promise.resolve();
+  const run = previous.then(work, work);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  syncQueues.set(key, tail);
+  void tail.finally(() => {
+    if (syncQueues.get(key) === tail) syncQueues.delete(key);
+  });
+  return run;
+}
+
+async function resolveKnownRoots(
+  roots: readonly KnownRelationRoot[],
+  signal?: AbortSignal,
+): Promise<ResolvedKnownRoot[]> {
+  const seenLogical = new Set<string>();
+  const resolved: ResolvedKnownRoot[] = [];
+  for (const entry of roots) {
+    signal?.throwIfAborted();
+    if (!entry.path?.trim()) continue;
+    const logicalRoot = path.resolve(entry.path);
+    if (seenLogical.has(logicalRoot)) continue;
+    seenLogical.add(logicalRoot);
+    try {
+      const realRoot = await fs.realpath(logicalRoot);
+      const stat = await fs.stat(realRoot);
+      if (!stat.isDirectory()) continue;
+      resolved.push({
+        logicalRoot,
+        realRoot,
+        source: entry.source,
+        label: entry.label,
+      });
+    } catch {
+      // Missing or inaccessible root; skip without failing sibling roots.
+    }
+  }
+  resolved.sort((a, b) => b.logicalRoot.length - a.logicalRoot.length);
+  return resolved;
+}
+
+function relativeSourcePath(
+  rootDir: string,
+  targetPath: string,
+): string | undefined {
+  const rel = path.relative(rootDir, targetPath);
+  if (
+    !rel ||
+    rel === ".." ||
+    rel.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(rel)
+  )
+    return;
+  const posixRel = rel.split(path.sep).join("/");
+  return validSourcePath(posixRel) ? posixRel : undefined;
+}
+
+async function matchSkillToKnownRoot(
+  skill: { name: string; location: string },
+  actual: string,
+  roots: readonly ResolvedKnownRoot[],
+): Promise<{ root: ResolvedKnownRoot; sourcePath: string } | undefined> {
+  const resolvedLocation = path.resolve(skill.location);
+  for (const root of roots) {
+    const candidates = [
+      relativeSourcePath(root.logicalRoot, resolvedLocation),
+      relativeSourcePath(root.realRoot, actual),
+    ];
+    for (const sourcePath of candidates) {
+      if (!sourcePath) continue;
+      if (
+        (await bindingFile(
+          { root: root.realRoot },
+          { name: skill.name, source_path: sourcePath },
+        )) === actual
+      ) {
+        return { root, sourcePath };
+      }
+    }
+  }
+  return;
+}
+
+async function collectBoundState(registry: RelationSourceRegistry): Promise<{
+  boundActualFiles: Set<string>;
+  existingLocations: Set<string>;
+}> {
+  const boundActualFiles = new Set<string>();
+  const existingLocations = new Set<string>();
+  for (const source of registry.sources) {
+    for (const binding of Object.values(source.skills)) {
+      existingLocations.add(path.join(source.root, binding.source_path));
+      const actual = await bindingFile(source, binding);
+      if (actual) boundActualFiles.add(actual);
+    }
+  }
+  return { boundActualFiles, existingLocations };
+}
+
+function deriveAutoSkillKey(
+  skillName: string,
+  sourcePath: string,
+  existingSkills: Record<string, RelationSourceBinding>,
+): string | undefined {
+  let base = canonicalIdentity(skillName);
+  if (!validSkillKey(base)) {
+    base = base
+      .replace(/[^\p{L}\p{N}._-]+/gu, "-")
+      .replace(/^[^\p{L}\p{N}]+/u, "")
+      .replace(/-+$/u, "");
+  }
+  if (!validSkillKey(base)) {
+    base = `skill-${createHash("sha256").update(sourcePath).digest("hex").slice(0, 8)}`;
+  }
+  if (!validSkillKey(base)) return;
+  if (!Object.hasOwn(existingSkills, base)) return base;
+  const suffixed = `${base}-${createHash("sha256").update(sourcePath).digest("hex").slice(0, 8)}`;
+  if (!validSkillKey(suffixed) || Object.hasOwn(existingSkills, suffixed))
+    return;
+  return suffixed;
+}
+
+function defaultRootLabel(root: ResolvedKnownRoot): string | undefined {
+  if (root.label && text(root.label)) return root.label;
+  if (root.source) return `${root.source} skills`;
+  return;
+}
+
+export type RelationSourcesInspection =
+  | { status: "valid"; registry: RelationSourceRegistry }
+  | { status: "missing" }
+  | {
+      status: "invalid";
+      reason:
+        | "invalid-directory"
+        | "invalid-registry"
+        | "missing-with-existing-graph";
+    };
+
+function isStableGraphSkillId(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (value.startsWith("local:") ||
+      value.startsWith("github:") ||
+      value.startsWith("git:"))
+  );
+}
+
+async function hasDependentGraphState(
+  graphFile: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  signal?.throwIfAborted();
+  let stat;
+  try {
+    stat = await fs.lstat(graphFile);
+  } catch (error) {
+    signal?.throwIfAborted();
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    return true;
+  }
+  signal?.throwIfAborted();
+  if (!stat.isFile() || stat.isSymbolicLink()) return true;
+  let raw: string;
+  try {
+    raw = await fs.readFile(graphFile, "utf8");
+  } catch {
+    signal?.throwIfAborted();
+    return true;
+  }
+  signal?.throwIfAborted();
+  if (!raw.trim()) return false;
+  // Reuse canonical graph replay so any structurally invalid record fails closed.
+  try {
+    replayRelationGraph(raw);
+  } catch {
+    return true;
+  }
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    const record = JSON.parse(line) as Record<string, unknown>;
+    if (record.op === "create") {
+      const entity = record.entity as Record<string, unknown>;
+      if (
+        isStableGraphSkillId(entity.id) ||
+        (object(entity.properties) &&
+          (entity.properties.formatVersion === 2 ||
+            typeof entity.properties.source_id === "string"))
+      ) {
+        return true;
+      }
+    } else if (record.op === "update" || record.op === "delete") {
+      if (isStableGraphSkillId(record.id)) return true;
+    } else if (record.op === "relate" || record.op === "unrelate") {
+      if (
+        isStableGraphSkillId(record.from) ||
+        isStableGraphSkillId(record.to) ||
+        (object(record.properties) && record.properties.formatVersion === 2)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function readSourcesFileState(
+  sourcesFile: string,
+  signal?: AbortSignal,
+): Promise<
+  | { status: "valid"; registry: RelationSourceRegistry }
+  | { status: "enoent" }
+  | { status: "invalid" }
+> {
+  let fileStat;
+  try {
+    fileStat = await fs.lstat(sourcesFile);
+    signal?.throwIfAborted();
+  } catch (error) {
+    signal?.throwIfAborted();
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { status: "enoent" };
+    }
+    return { status: "invalid" };
+  }
+
+  if (!fileStat.isFile() || fileStat.isSymbolicLink()) {
+    return { status: "invalid" };
+  }
+
+  try {
+    const raw = await fs.readFile(sourcesFile, "utf8");
+    signal?.throwIfAborted();
+    const registry = validateRelationSources(JSON.parse(raw));
+    return { status: "valid", registry };
+  } catch {
+    signal?.throwIfAborted();
+    return { status: "invalid" };
+  }
+}
+
+/**
+ * Inspect `skill-relations/sources.json` distinctly as `valid`, `missing`
+ * (fresh install without dependent stable-ID graph state), or `invalid`
+ * (corrupt/symlinked registry, invalid directory, or missing registry alongside
+ * an existing stable-ID `graph.jsonl`).
+ */
+export async function inspectRelationSources(
+  dataRoot: string,
+  signal?: AbortSignal,
+): Promise<RelationSourcesInspection> {
+  signal?.throwIfAborted();
+  const sourcesFile = relationSourcesPath(dataRoot);
+  const directory = path.dirname(sourcesFile);
+  try {
+    const dirStat = await fs.lstat(directory);
+    signal?.throwIfAborted();
+    if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) {
+      return { status: "invalid", reason: "invalid-directory" };
+    }
+  } catch (error) {
+    signal?.throwIfAborted();
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { status: "missing" };
+    }
+    return { status: "invalid", reason: "invalid-directory" };
+  }
+
+  const initial = await readSourcesFileState(sourcesFile, signal);
+  if (initial.status === "valid") {
+    return { status: "valid", registry: initial.registry };
+  }
+  if (initial.status === "invalid") {
+    return { status: "invalid", reason: "invalid-registry" };
+  }
+
+  const dependent = await hasDependentGraphState(
+    path.join(directory, "graph.jsonl"),
+    signal,
+  );
+  if (!dependent) {
+    return { status: "missing" };
+  }
+
+  // A peer may have published `sources.json` and then `graph.jsonl` between our
+  // initial registry miss and graph inspection; recheck before declaring a
+  // missing-registry fault.
+  const rechecked = await readSourcesFileState(sourcesFile, signal);
+  if (rechecked.status === "valid") {
+    return { status: "valid", registry: rechecked.registry };
+  }
+  if (rechecked.status === "invalid") {
+    return { status: "invalid", reason: "invalid-registry" };
+  }
+  return { status: "invalid", reason: "missing-with-existing-graph" };
+}
+
+interface PlannedAutoRegistration {
+  nextSources: RelationSource[];
+  registeredCount: number;
+  createdSourceIds: string[];
+}
+
+async function planAutoRegistrations(params: {
+  current: RelationSourceRegistry | undefined;
+  skills: readonly { name: string; location: string; source?: SkillSource }[];
+  resolvedRoots: readonly ResolvedKnownRoot[];
+  signal?: AbortSignal;
+  stopAfterFirst?: boolean;
+}): Promise<PlannedAutoRegistration> {
+  const nextSources: RelationSource[] = (params.current?.sources ?? []).map(
+    (source) => ({
+      ...source,
+      skills: { ...source.skills },
+    }),
+  );
+  const { boundActualFiles, existingLocations } = await collectBoundState({
+    version: 1,
+    sources: nextSources,
+  });
+  params.signal?.throwIfAborted();
+  const localByRoot = new Map<string, RelationSource>();
+  const namesBySource = new Map<RelationSource, Set<string>>();
+  for (const source of nextSources) {
+    if (source.id.startsWith("local:")) {
+      localByRoot.set(source.root, source);
+    }
+    namesBySource.set(
+      source,
+      new Set(
+        Object.values(source.skills).map((binding) =>
+          canonicalIdentity(binding.name),
+        ),
+      ),
+    );
+  }
+
+  let registeredCount = 0;
+  const createdSourceIds: string[] = [];
+
+  for (const skill of params.skills) {
+    params.signal?.throwIfAborted();
+    if (!text(skill.name) || path.basename(skill.location) !== "SKILL.md")
+      continue;
+    const actual = await resolveConfinedFile(
+      path.dirname(skill.location),
+      skill.location,
+    );
+    params.signal?.throwIfAborted();
+    if (!actual || boundActualFiles.has(actual)) continue;
+    const matched = await matchSkillToKnownRoot(
+      skill,
+      actual,
+      params.resolvedRoots,
+    );
+    params.signal?.throwIfAborted();
+    if (!matched) continue;
+
+    const candidateLocation = path.join(
+      matched.root.realRoot,
+      matched.sourcePath,
+    );
+    if (existingLocations.has(candidateLocation)) continue;
+
+    let targetSource = localByRoot.get(matched.root.realRoot);
+    const canonicalName = canonicalIdentity(skill.name);
+    if (targetSource && namesBySource.get(targetSource)?.has(canonicalName)) {
+      continue;
+    }
+    const key = deriveAutoSkillKey(
+      skill.name,
+      matched.sourcePath,
+      targetSource?.skills ?? {},
+    );
+    if (!key) continue;
+
+    try {
+      const raw = await fs.readFile(actual, "utf8");
+      params.signal?.throwIfAborted();
+      const parsed = parseInertYamlFrontmatter(raw);
+      if (
+        typeof parsed.data.name !== "string" ||
+        parsed.data.name.trim() !== skill.name
+      ) {
+        continue;
+      }
+    } catch {
+      params.signal?.throwIfAborted();
+      continue;
+    }
+
+    if (params.stopAfterFirst) {
+      return { nextSources, registeredCount: 1, createdSourceIds };
+    }
+
+    if (!targetSource) {
+      const id = `local:${randomUUID()}`;
+      const label = defaultRootLabel(matched.root);
+      targetSource = {
+        id,
+        root: matched.root.realRoot,
+        ...(label === undefined ? {} : { label }),
+        skills: {},
+      };
+      nextSources.push(targetSource);
+      localByRoot.set(matched.root.realRoot, targetSource);
+      namesBySource.set(targetSource, new Set());
+      createdSourceIds.push(id);
+    }
+
+    Object.defineProperty(targetSource.skills, key, {
+      value: { name: skill.name, source_path: matched.sourcePath },
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+    boundActualFiles.add(actual);
+    existingLocations.add(candidateLocation);
+    namesBySource.get(targetSource)!.add(canonicalName);
+    registeredCount += 1;
+  }
+
+  return { nextSources, registeredCount, createdSourceIds };
+}
+
+/**
+ * Automatically register unregistered valid skills located inside known OpenClaw
+ * skill roots. Reuses each root's existing local UUID, parses skill frontmatter
+ * strictly as inert YAML, preserves existing remote/local bindings without
+ * creating duplicate aliases, publishes `sources.json` atomically with mode
+ * `0600`, honors cancellation right before publication, and fails closed on
+ * corrupt, symlinked, or missing-with-existing-graph registry state.
+ */
+export async function ensureKnownRelationSources(
+  params: EnsureKnownRelationSourcesParams,
+): Promise<EnsureKnownRelationSourcesResult | undefined> {
+  params.signal?.throwIfAborted();
+  if (!params.skills.length || !params.roots.length) {
+    return { registeredCount: 0, createdSourceIds: [] };
+  }
+  const sourcesFile = relationSourcesPath(params.dataRoot);
+  const directory = path.dirname(sourcesFile);
+  const precheck = await inspectRelationSources(params.dataRoot, params.signal);
+  params.signal?.throwIfAborted();
+  if (precheck.status === "invalid") return undefined;
+
+  const resolvedRoots = await resolveKnownRoots(params.roots, params.signal);
+  params.signal?.throwIfAborted();
+  if (!resolvedRoots.length) {
+    return { registeredCount: 0, createdSourceIds: [] };
+  }
+
+  const precheckPlan = await planAutoRegistrations({
+    current: precheck.status === "valid" ? precheck.registry : undefined,
+    skills: params.skills,
+    resolvedRoots,
+    signal: params.signal,
+    stopAfterFirst: true,
+  });
+  if (precheckPlan.registeredCount === 0) {
+    return { registeredCount: 0, createdSourceIds: [] };
+  }
+
+  return enqueueRelationSourceSync(params.dataRoot, async () => {
+    params.signal?.throwIfAborted();
+    const beforeLock = await inspectRelationSources(
+      params.dataRoot,
+      params.signal,
+    );
+    params.signal?.throwIfAborted();
+    if (beforeLock.status === "invalid") return undefined;
+
+    return withFileLock(
+      path.join(directory, "graph.jsonl"),
+      async () => {
+        params.signal?.throwIfAborted();
+        const currentState = await inspectRelationSources(
+          params.dataRoot,
+          params.signal,
+        );
+        params.signal?.throwIfAborted();
+        if (currentState.status === "invalid") return undefined;
+        await fs.chmod(directory, 0o700);
+        params.signal?.throwIfAborted();
+
+        const plan = await planAutoRegistrations({
+          current:
+            currentState.status === "valid" ? currentState.registry : undefined,
+          skills: params.skills,
+          resolvedRoots,
+          signal: params.signal,
+        });
+        params.signal?.throwIfAborted();
+        if (plan.registeredCount === 0) {
+          return { registeredCount: 0, createdSourceIds: [] };
+        }
+
+        plan.nextSources.sort((a, b) =>
+          a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+        );
+        const validated = validateRelationSources({
+          version: 1,
+          sources: plan.nextSources,
+        });
+        params.signal?.throwIfAborted();
+        writeJsonAtomic(sourcesFile, validated, {
+          mode: 0o600,
+          signal: params.signal,
+        });
+        return {
+          registeredCount: plan.registeredCount,
+          createdSourceIds: plan.createdSourceIds,
+        };
+      },
+      { signal: params.signal },
+    );
+  });
 }
