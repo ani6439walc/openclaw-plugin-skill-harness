@@ -189,7 +189,7 @@ its writer participates in plugin locking or enforces plugin validation.
 Relation expansion and relation scoring are always active when usable graph
 evidence exists; there is no enable switch. Expand only outgoing declarations from the first
 8 ranked original name/QMD candidates, one hop, round-robin, at most 2 new
-skills per seed and 8 per turn; alphabetize targets and do not charge duplicates.
+skills per seed and 8 per turn. Count only newly added targets toward those limits.
 Require current visible winning identities and a nonempty original reason.
 Use canonicalIdentity() for graph/visibility lookups, expansion deduplication
 and self comparisons; preserve original names in output.
@@ -201,11 +201,20 @@ new skill selection thresholds or fallback injection. `relatedCandidates` is opt
 session/event diagnostics; `related-declared` injection contributes to pool
 counts only, never QMD or collection attribution. Do not recalculate old stats.
 
+Both expansion and relevance scoring prioritize `depends_on`, `composes_with`,
+`specializes`, `conflicts_with`, `similar_to`, and `related` in that order.
+Unrecognized types rank last. Within the same type,
+Review provenance comes before author imports and unspecified sources. Break
+remaining ties with locale comparison of the neighbor name, direction, then
+relation type. Apply this order within each expansion seed or scoring candidate
+before enforcing its limits.
+
 Collect relation relevance evidence independently
 from candidate expansion: at most two incoming/outgoing relations per candidate,
-16 questions total, preserving original `from`/`to`. Anchor each relation to the
-candidate being described. Both endpoints require current visible winning
-identities and a nonempty author reason; include each endpoint's name and
+16 questions total, distributed round-robin across candidates. Preserve the
+original `from`/`to` and anchor each relation to the candidate being described.
+Both endpoints require current visible winning
+identities and a nonempty relation reason. Include each endpoint's name and
 bounded description (1,000 code points) even if the other endpoint is not a
 candidate. That background endpoint does not become a candidate, receive its own
 skill question, or consume an injection slot. Reasons are bounded to 500 code
@@ -214,8 +223,8 @@ points. All six predicates remain unverified advisory evidence.
 The Decision state carries `skill_candidates` with name, description, discovery sources and relation IDs. `skill_relation_evidence` provides the corresponding question ID (`relation_0`, etc.), anchor, direction and bounded endpoint evidence. Questions reference their state entries. Noncandidate endpoints provide background. Each skill receives its own independent selection score.
 
 Score relation reference value for the current task in the existing single Decision
-call, separately from skill relevance. Use the author reason and both endpoint
-descriptions; author declarations remain unverified reference data, not instructions.
+call, separately from skill relevance. Use the relation reason and both endpoint
+descriptions; relation declarations remain unverified reference data, not instructions.
 Do not score a relation as a prerequisite-verification or unmet-necessity test.
 Keep skill candidate guidance and its no-co-loading boundary unchanged.
 Render only relations scoring at least routing.skills.related.relevanceThreshold
