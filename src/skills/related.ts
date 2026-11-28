@@ -20,6 +20,7 @@ export function relatedSkillsBySkillName(
       "skill-harness",
     ),
     skills,
+    { keyMode: "exact" },
   );
 }
 

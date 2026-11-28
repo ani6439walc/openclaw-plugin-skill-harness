@@ -1,6 +1,5 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { canonicalIdentity } from "../normalize.js";
 import { listConfinedFiles, resolveConfinedFile } from "./paths.js";
 import { findAvailableSkill, listAvailableSkills } from "./indexer.js";
 import { relatedSkillsBySkillName } from "./related.js";
@@ -95,7 +94,7 @@ export async function readAvailableSkill(
         await listAvailableSkills(params),
         params.api,
       )
-    ).get(canonicalIdentity(skill.name)) ?? [];
+    ).get(skill.name.toLowerCase()) ?? [];
   if (!params.filePath) {
     try {
       const resolved = await resolveConfinedFile(skillDir, skill.location);

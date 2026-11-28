@@ -430,3 +430,25 @@ it("orders resolved graph relations by type priority before neighbor name and di
     ["b-rel", "related", "current-to-related"],
   ]);
 });
+
+it("keeps NFKC-equivalent skill names separated when keyMode is exact", async () => {
+  const ascii = await skill("alpha");
+  const fullwidth = await skill("ａｌｐｈａ");
+  const target = await skill("target");
+  const fwId = (await readSkillIdentity(fullwidth))!;
+  const targetId = (await readSkillIdentity(target))!;
+  await appendImportedRelations(root, [
+    { from: fwId, to: targetId, type: "composes_with", reason: "fw-only" },
+  ]);
+  const exact = await resolveRelationGraph(root, [ascii, fullwidth, target], {
+    keyMode: "exact",
+  });
+  expect(exact.get("alpha")).toBeUndefined();
+  expect(exact.get("ａｌｐｈａ")).toEqual([
+    expect.objectContaining({
+      name: "target",
+      relation_type: "composes_with",
+      reason: "fw-only",
+    }),
+  ]);
+});

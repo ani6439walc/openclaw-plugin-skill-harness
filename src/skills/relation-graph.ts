@@ -342,6 +342,7 @@ function validProperties(p: Record<string, unknown>): boolean {
 export async function resolveRelationGraph(
   dataRoot: string,
   skills: readonly { name: string; location: string }[],
+  options?: { keyMode?: "canonical" | "exact" },
 ): Promise<Map<string, GraphRelatedSkill[]>> {
   const result = new Map<string, GraphRelatedSkill[]>();
   const graph = await readRelationGraph(dataRoot);
@@ -424,7 +425,10 @@ export async function resolveRelationGraph(
       [from.name, to.name, "current-to-related"],
       [to.name, from.name, "related-to-current"],
     ] as const) {
-      const key = canonicalIdentity(name);
+      const key =
+        options?.keyMode === "exact"
+          ? name.toLowerCase()
+          : canonicalIdentity(name);
       const list = result.get(key) ?? [];
       list.push({
         name: other,

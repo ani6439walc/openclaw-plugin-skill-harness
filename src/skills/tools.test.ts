@@ -1,9 +1,10 @@
-import fs from "node:fs";
+import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+vi.mock("node:fs", { spy: true });
 import { registerSkillTools } from "./tools.js";
 import {
   createReviewToolRegistry,
@@ -1139,6 +1140,311 @@ describe("registerSkillTools", () => {
     } finally {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
       fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves distinct NFKC-equivalent skill identities and relations across search, list, view, and review binding", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-nfkc-"));
+    try {
+      const workspaceDir = path.join(tmp, "workspace");
+      const stateDir = path.join(tmp, "state");
+      const fullwidthAlpha = "ａｌｐｈａ";
+      const fullwidthBeta = "ｂｅｔａ";
+      writeSkill(workspaceDir, "alpha", {}, "ASCII alpha skill.");
+      writeSkill(workspaceDir, fullwidthAlpha, {}, "Fullwidth alpha skill.");
+      writeSkill(workspaceDir, "beta", {}, "ASCII beta skill.");
+      writeSkill(workspaceDir, fullwidthBeta, {}, "Fullwidth beta skill.");
+      writeSkill(workspaceDir, "target", {}, "Target skill.");
+
+      await seedRelation(
+        stateDir,
+        workspaceDir,
+        fullwidthAlpha,
+        workspaceDir,
+        "target",
+        "Fullwidth alpha links to target.",
+      );
+      await seedRelation(
+        stateDir,
+        workspaceDir,
+        "beta",
+        workspaceDir,
+        "target",
+        "ASCII beta links to target.",
+      );
+
+      const api = createApi(stateDir, workspaceDir);
+      const qmdSkillIndex: SkillQmdIndex = {
+        schedule: vi.fn(),
+        search: vi.fn(async () => [
+          {
+            name: "alpha",
+            score: 0.92,
+            evidence: [
+              {
+                collection: "skill-meta",
+                path: "alpha/SKILL.md",
+                score: 0.92,
+                snippet: "ASCII alpha skill.",
+              },
+            ],
+          },
+          {
+            name: fullwidthAlpha,
+            score: 0.81,
+            evidence: [
+              {
+                collection: "skill-meta",
+                path: "fullwidth-alpha/SKILL.md",
+                score: 0.81,
+                snippet: "Fullwidth alpha skill.",
+              },
+            ],
+          },
+          { name: "beta", score: 0.72 },
+          { name: fullwidthBeta, score: 0.61 },
+        ]),
+        getStatus: vi.fn(() => "ready"),
+        close: vi.fn(async () => {}),
+      };
+      const registry = createReviewToolRegistry();
+      registerSkillTools(api, {
+        qmdSkillIndex,
+        reviewToolRegistry: registry,
+        bundledSkillsDir: "",
+        homeDir: path.join(tmp, "home"),
+      });
+      const tools = toolsForAgent(api, "main");
+      const search = tools.get("skill_search");
+      const list = tools.get("skill_list");
+      const view = tools.get("skill_view");
+
+      const searchDefault = await runTool(search, { query: "alpha" });
+      expect(searchDefault.skills.map((s: { name: string }) => s.name)).toEqual(
+        ["alpha", fullwidthAlpha, "beta", fullwidthBeta],
+      );
+      expect(searchDefault.skills[0]).toMatchObject({
+        name: "alpha",
+        description: "ASCII alpha skill.",
+        score: 0.92,
+        evidence: [{ snippet: "ASCII alpha skill." }],
+        related_skills: [],
+        related_skills_total: 0,
+      });
+      expect(searchDefault.skills[1]).toMatchObject({
+        name: fullwidthAlpha,
+        description: "Fullwidth alpha skill.",
+        score: 0.81,
+        evidence: [{ snippet: "Fullwidth alpha skill." }],
+        related_skills: [
+          {
+            name: "target",
+            reason: "Fullwidth alpha links to target.",
+            direction: "current-to-related",
+          },
+        ],
+        related_skills_total: 1,
+      });
+      expect(searchDefault.skills[2]).toMatchObject({
+        name: "beta",
+        related_skills: [
+          {
+            name: "target",
+            reason: "ASCII beta links to target.",
+            direction: "current-to-related",
+          },
+        ],
+        related_skills_total: 1,
+      });
+      expect(searchDefault.skills[3]).toMatchObject({
+        name: fullwidthBeta,
+        related_skills: [],
+        related_skills_total: 0,
+      });
+
+      const searchNoRelated = await runTool(search, {
+        query: "alpha",
+        show_related: false,
+      });
+      expect(
+        searchNoRelated.skills.map((s: { name: string }) => s.name),
+      ).toEqual(["alpha", fullwidthAlpha, "beta", fullwidthBeta]);
+
+      const run = registry.register({
+        agentId: "main",
+        sessionId: "nfkc-review",
+        sessionKey: "nfkc-review-key",
+      });
+      try {
+        const reviewTools = toolsForAgent(api, "main", {
+          sessionId: "nfkc-review",
+          sessionKey: "nfkc-review-key",
+          toolBindings: structuredClone({
+            [REVIEW_TOOL_BINDING_KEY]: run.binding,
+          }),
+        });
+        const reviewSearch = await runTool(reviewTools.get("skill_search"), {
+          query: "alpha",
+        });
+        expect(
+          reviewSearch.skills.map((s: { name: string }) => s.name),
+        ).toEqual(["alpha", fullwidthAlpha, "beta", fullwidthBeta]);
+      } finally {
+        await run.close();
+      }
+
+      const listRes = await runTool(list, { show_related: true });
+      const byName = new Map(
+        listRes.skills.map((s: { name: string }) => [s.name, s]),
+      );
+      expect(byName.get("alpha")).toMatchObject({ related_skills: [] });
+      expect(byName.get(fullwidthAlpha)).toMatchObject({
+        related_skills: [{ name: "target" }],
+      });
+      expect(byName.get("beta")).toMatchObject({
+        related_skills: [{ name: "target" }],
+      });
+      expect(byName.get(fullwidthBeta)).toMatchObject({ related_skills: [] });
+
+      expect(await runTool(view, { name: "alpha" })).toMatchObject({
+        related_skills: [],
+      });
+      expect(await runTool(view, { name: fullwidthAlpha })).toMatchObject({
+        related_skills: [{ name: "target" }],
+      });
+      expect(await runTool(view, { name: "beta" })).toMatchObject({
+        related_skills: [{ name: "target" }],
+      });
+      expect(await runTool(view, { name: fullwidthBeta })).toMatchObject({
+        related_skills: [],
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("skips stats and graph file I/O on unavailable, empty, non-visible, and opt-out skill_search paths", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-tools-io-"));
+    try {
+      const workspaceDir = path.join(tmp, "workspace");
+      const stateDir = path.join(tmp, "state");
+      const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+      const statsFile = path.join(dataRoot, "stats.json");
+      const graphFile = relationGraphPath(dataRoot);
+      writeSkill(workspaceDir, "react", {}, "Build React UIs");
+      writeSkill(workspaceDir, "nextjs", {}, "Build Next.js apps");
+      writeStats(stateDir, {
+        react: {
+          usageTurns: 5,
+          intentMatchedTurns: 4,
+          adoptedTurns: 3,
+          adoptionRate: 0.75,
+          last7DaysUsage: 2,
+          lifecycle: "active",
+          needsReview: false,
+        },
+      });
+      await seedRelation(
+        stateDir,
+        workspaceDir,
+        "react",
+        workspaceDir,
+        "nextjs",
+        "React composes with Next.js.",
+      );
+
+      let nextHits: Array<{ name: string; score: number }> | undefined =
+        undefined;
+      const api = createApi(stateDir, workspaceDir);
+      const qmdSkillIndex: SkillQmdIndex = {
+        schedule: vi.fn(),
+        search: vi.fn(async () => nextHits),
+        getStatus: vi.fn(() => "ready"),
+        close: vi.fn(async () => {}),
+      };
+      registerSkillTools(api, {
+        qmdSkillIndex,
+        bundledSkillsDir: "",
+        homeDir: path.join(tmp, "home"),
+      });
+      const search = toolsForAgent(api, "main").get("skill_search");
+
+      const readFileSyncSpy = vi.mocked(fs.readFileSync);
+      const statAsyncSpy = vi.mocked(fs.promises.stat);
+      const countStatsReads = () =>
+        readFileSyncSpy.mock.calls.filter(([target]) => target === statsFile)
+          .length;
+      const countGraphStats = () =>
+        statAsyncSpy.mock.calls.filter(([target]) => target === graphFile)
+          .length;
+
+      // 1. Index unavailable -> 0 stats reads, 0 graph reads
+      nextHits = undefined;
+      readFileSyncSpy.mockClear();
+      statAsyncSpy.mockClear();
+      expect(await runTool(search, { query: "react" })).toMatchObject({
+        success: false,
+      });
+      expect(countStatsReads()).toBe(0);
+      expect(countGraphStats()).toBe(0);
+
+      // 2. Empty hits -> 0 stats reads, 0 graph reads
+      nextHits = [];
+      readFileSyncSpy.mockClear();
+      statAsyncSpy.mockClear();
+      expect(await runTool(search, { query: "react" })).toMatchObject({
+        success: true,
+        total: 0,
+        skills: [],
+      });
+      expect(countStatsReads()).toBe(0);
+      expect(countGraphStats()).toBe(0);
+
+      // 3. Only non-visible hit -> 0 stats reads, 0 graph reads
+      nextHits = [{ name: "nonexistent", score: 0.9 }];
+      readFileSyncSpy.mockClear();
+      statAsyncSpy.mockClear();
+      expect(await runTool(search, { query: "react" })).toMatchObject({
+        success: true,
+        total: 0,
+        skills: [],
+      });
+      expect(countStatsReads()).toBe(0);
+      expect(countGraphStats()).toBe(0);
+
+      // 4. Visible hit with show_related: false and show_stats: false -> 0 stats reads, 0 graph reads
+      nextHits = [{ name: "react", score: 0.9 }];
+      readFileSyncSpy.mockClear();
+      statAsyncSpy.mockClear();
+      expect(
+        await runTool(search, { query: "react", show_related: false }),
+      ).toMatchObject({ success: true, total: 1 });
+      expect(countStatsReads()).toBe(0);
+      expect(countGraphStats()).toBe(0);
+
+      // 5. Visible hit with default params (show_related: true, show_stats: false) -> 0 stats reads, 1 graph stat
+      readFileSyncSpy.mockClear();
+      statAsyncSpy.mockClear();
+      expect(await runTool(search, { query: "react" })).toMatchObject({
+        success: true,
+        skills: [{ name: "react", related_skills_total: 1 }],
+      });
+      expect(countStatsReads()).toBe(0);
+      expect(countGraphStats()).toBe(1);
+
+      // 6. Visible hit with show_stats: true -> exactly 1 stats read (not 2)
+      readFileSyncSpy.mockClear();
+      statAsyncSpy.mockClear();
+      expect(
+        await runTool(search, { query: "react", show_stats: true }),
+      ).toMatchObject({
+        success: true,
+        skills: [{ name: "react", usage_stats: { usage_turns: 5 } }],
+      });
+      expect(countStatsReads()).toBe(1);
+      expect(countGraphStats()).toBe(1);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
 

@@ -4,7 +4,6 @@ import {
   type ReviewToolRegistry,
 } from "../review/tool-bindings.js";
 import type { OpenClawPluginApi } from "../../api.js";
-import { canonicalIdentity } from "../normalize.js";
 import { listAvailableSkills } from "./indexer.js";
 import { readAvailableSkill } from "./files.js";
 import { recordSkillUsageToStateDb } from "./state-usage.js";
@@ -164,7 +163,7 @@ export function registerSkillTools(
                 ...(relatedSkills
                   ? {
                       related_skills:
-                        relatedSkills.get(canonicalIdentity(skill.name)) ?? [],
+                        relatedSkills.get(skill.name.toLowerCase()) ?? [],
                     }
                   : {}),
                 ...(usageStats
@@ -264,14 +263,6 @@ export function registerSkillTools(
                 options.scheduleSkillSearchIndex?.(agentId);
               }
 
-              const inventory = await listAvailableSkills({
-                api,
-                agentId,
-                bundledSkillsDir: options.bundledSkillsDir,
-                nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
-                sharedRoots: options.getSharedRoots?.(),
-                homeDir: options.homeDir,
-              });
               const hits = await index.search({
                 agentId,
                 query,
@@ -284,15 +275,31 @@ export function registerSkillTools(
                   error: "skill search index is not ready",
                 });
               }
+              if (hits.length === 0) {
+                return jsonToolResult({
+                  success: true,
+                  query,
+                  total: 0,
+                  count: 0,
+                  limit,
+                  skills: [],
+                });
+              }
 
+              const inventory = await listAvailableSkills({
+                api,
+                agentId,
+                bundledSkillsDir: options.bundledSkillsDir,
+                nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
+                sharedRoots: options.getSharedRoots?.(),
+                homeDir: options.homeDir,
+                usageStats: {},
+              });
               const inventoryByName = new Map(
-                inventory.map((skill) => [
-                  canonicalIdentity(skill.name),
-                  skill,
-                ]),
+                inventory.map((skill) => [skill.name.toLowerCase(), skill]),
               );
               const matchedHits = hits.flatMap((hit) => {
-                const skill = inventoryByName.get(canonicalIdentity(hit.name));
+                const skill = inventoryByName.get(hit.name.toLowerCase());
                 return skill ? [{ hit, skill }] : [];
               });
               const relatedSkills =
@@ -307,7 +314,7 @@ export function registerSkillTools(
               const skills = matchedHits
                 .map(({ hit, skill }) => {
                   const allRelated = relatedSkills
-                    ? (relatedSkills.get(canonicalIdentity(skill.name)) ?? [])
+                    ? (relatedSkills.get(skill.name.toLowerCase()) ?? [])
                     : undefined;
                   return {
                     name: skill.name,
