@@ -360,3 +360,95 @@ it("does not lose distinct concurrent imports and preserves history on failed pu
     ),
   ).toBe(false);
 });
+
+it("orders resolved graph relations by type priority before neighbor name and direction", async () => {
+  const a = await skill("a");
+  const zDep = await skill("z-dep");
+  const ySpec = await skill("y-spec");
+  const xComp = await skill("x-comp");
+  const wConf = await skill("w-conf");
+  const vSim = await skill("v-sim");
+  const bRel = await skill("b-rel");
+  const all = [a, zDep, ySpec, xComp, wConf, vSim, bRel];
+  const ids = new Map(
+    await Promise.all(
+      all.map(
+        async (entry) =>
+          [entry.name, (await readSkillIdentity(entry))!] as const,
+      ),
+    ),
+  );
+  await appendImportedRelations(root, [
+    {
+      from: ids.get("a")!,
+      to: ids.get("b-rel")!,
+      type: "related",
+      reason: "rel",
+    },
+    {
+      from: ids.get("v-sim")!,
+      to: ids.get("a")!,
+      type: "similar_to",
+      reason: "sim",
+    },
+    {
+      from: ids.get("a")!,
+      to: ids.get("w-conf")!,
+      type: "conflicts_with",
+      reason: "conf",
+    },
+    {
+      from: ids.get("y-spec")!,
+      to: ids.get("a")!,
+      type: "specializes",
+      reason: "spec",
+    },
+    {
+      from: ids.get("a")!,
+      to: ids.get("x-comp")!,
+      type: "composes_with",
+      reason: "comp",
+    },
+    {
+      from: ids.get("z-dep")!,
+      to: ids.get("a")!,
+      type: "depends_on",
+      reason: "dep",
+    },
+  ]);
+  const resolved = await resolveRelationGraph(root, all);
+  expect(
+    resolved
+      .get("a")
+      ?.map((edge) => [edge.name, edge.relation_type, edge.direction]),
+  ).toEqual([
+    ["z-dep", "depends_on", "related-to-current"],
+    ["x-comp", "composes_with", "current-to-related"],
+    ["y-spec", "specializes", "related-to-current"],
+    ["w-conf", "conflicts_with", "current-to-related"],
+    ["v-sim", "similar_to", "related-to-current"],
+    ["b-rel", "related", "current-to-related"],
+  ]);
+});
+
+it("keeps NFKC-equivalent skill names separated when keyMode is exact", async () => {
+  const ascii = await skill("alpha");
+  const fullwidth = await skill("ａｌｐｈａ");
+  const target = await skill("target");
+  const fwId = (await readSkillIdentity(fullwidth))!;
+  const targetId = (await readSkillIdentity(target))!;
+  await appendImportedRelations(root, [
+    { from: fwId, to: targetId, type: "composes_with", reason: "fw-only" },
+  ]);
+  const exact = await resolveRelationGraph(root, [ascii, fullwidth, target], {
+    keyMode: "exact",
+  });
+  expect(exact.get("alpha")).toBeUndefined();
+  expect(exact.get("ａｌｐｈａ")).toEqual([
+    expect.objectContaining({
+      name: "target",
+      relation_type: "composes_with",
+      reason: "fw-only",
+    }),
+  ]);
+});

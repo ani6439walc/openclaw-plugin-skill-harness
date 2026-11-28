@@ -22,6 +22,33 @@ export const scoredRelationTypes = [
 ] as const;
 export const relationTypes = ["related", ...scoredRelationTypes] as const;
 export type RelationType = (typeof relationTypes)[number];
+
+const relationTypePriority = new Map<RelationType, number>([
+  ["depends_on", 0],
+  ["composes_with", 1],
+  ["specializes", 2],
+  ["conflicts_with", 3],
+  ["similar_to", 4],
+  ["related", 5],
+]);
+
+export function compareRelationEdges(
+  a: Pick<GraphRelatedSkill, "relation_type" | "source" | "name" | "direction">,
+  b: Pick<GraphRelatedSkill, "relation_type" | "source" | "name" | "direction">,
+): number {
+  const typeOrder =
+    (relationTypePriority.get(a.relation_type) ?? Number.MAX_SAFE_INTEGER) -
+    (relationTypePriority.get(b.relation_type) ?? Number.MAX_SAFE_INTEGER);
+  const sourceOrder =
+    (a.source === "review" ? 0 : 1) - (b.source === "review" ? 0 : 1);
+  return (
+    typeOrder ||
+    sourceOrder ||
+    a.name.localeCompare(b.name) ||
+    a.direction.localeCompare(b.direction) ||
+    a.relation_type.localeCompare(b.relation_type)
+  );
+}
 export type RelationScores = Record<
   (typeof scoredRelationTypes)[number],
   number
@@ -315,6 +342,7 @@ function validProperties(p: Record<string, unknown>): boolean {
 export async function resolveRelationGraph(
   dataRoot: string,
   skills: readonly { name: string; location: string }[],
+  options?: { keyMode?: "canonical" | "exact" },
 ): Promise<Map<string, GraphRelatedSkill[]>> {
   const result = new Map<string, GraphRelatedSkill[]>();
   const graph = await readRelationGraph(dataRoot);
@@ -397,7 +425,10 @@ export async function resolveRelationGraph(
       [from.name, to.name, "current-to-related"],
       [to.name, from.name, "related-to-current"],
     ] as const) {
-      const key = canonicalIdentity(name);
+      const key =
+        options?.keyMode === "exact"
+          ? name.toLowerCase()
+          : canonicalIdentity(name);
       const list = result.get(key) ?? [];
       list.push({
         name: other,
@@ -411,13 +442,7 @@ export async function resolveRelationGraph(
       result.set(key, list);
     }
   }
-  for (const list of result.values())
-    list.sort(
-      (a, b) =>
-        a.direction.localeCompare(b.direction) ||
-        a.name.localeCompare(b.name) ||
-        a.relation_type.localeCompare(b.relation_type),
-    );
+  for (const list of result.values()) list.sort(compareRelationEdges);
   return result;
 }
 export const relationSchema = `types:\n  Skill:\n    required: [name, source, fingerprint, formatVersion]\nrelations:\n${relationTypes.map((type) => `  ${type}:\n    from_types: [Skill]\n    to_types: [Skill]\n`).join("")}`;

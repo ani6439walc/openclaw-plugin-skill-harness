@@ -17,6 +17,7 @@ const MAX_SKILL_LIST_LIMIT = 500;
 const DEFAULT_SKILL_SEARCH_LIMIT = 20;
 const MAX_SKILL_SEARCH_LIMIT = 100;
 const MAX_SKILL_SEARCH_QUERY_CODE_POINTS = 1_000;
+const MAX_SKILL_SEARCH_RELATED = 3;
 
 export interface RegisterSkillToolsOptions {
   reviewToolRegistry?: ReviewToolRegistry;
@@ -217,7 +218,7 @@ export function registerSkillTools(
             show_related: Type.Optional(
               Type.Boolean({
                 description:
-                  "When true, include direct unverified graph relations with type, relation reason, source (author-import or review) and original direction; these are not required dependencies.",
+                  "When true, include up to 3 top-ranked direct unverified graph relations with type, relation reason, source (author-import or review) and original direction, plus related_skills_total; these are not required dependencies. Defaults to true. Use skill_view to inspect all relations.",
               }),
             ),
           }),
@@ -248,7 +249,7 @@ export function registerSkillTools(
               );
               const showStats = booleanParam(params, "show_stats");
               const showEvidence = booleanParam(params, "show_evidence", true);
-              const showRelated = booleanParam(params, "show_related");
+              const showRelated = booleanParam(params, "show_related", true);
 
               const index = options.qmdSkillIndex;
               if (!index) {
@@ -262,17 +263,6 @@ export function registerSkillTools(
                 options.scheduleSkillSearchIndex?.(agentId);
               }
 
-              const inventory = await listAvailableSkills({
-                api,
-                agentId,
-                bundledSkillsDir: options.bundledSkillsDir,
-                nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
-                sharedRoots: options.getSharedRoots?.(),
-                homeDir: options.homeDir,
-              });
-              const relatedSkills = showRelated
-                ? await relatedSkillsBySkillName(inventory, api)
-                : undefined;
               const hits = await index.search({
                 agentId,
                 query,
@@ -285,18 +275,47 @@ export function registerSkillTools(
                   error: "skill search index is not ready",
                 });
               }
+              if (hits.length === 0) {
+                return jsonToolResult({
+                  success: true,
+                  query,
+                  total: 0,
+                  count: 0,
+                  limit,
+                  skills: [],
+                });
+              }
 
+              const inventory = await listAvailableSkills({
+                api,
+                agentId,
+                bundledSkillsDir: options.bundledSkillsDir,
+                nativeBundledSkillsDir: await options.nativeBundledSkillsDir,
+                sharedRoots: options.getSharedRoots?.(),
+                homeDir: options.homeDir,
+                usageStats: {},
+              });
               const inventoryByName = new Map(
                 inventory.map((skill) => [skill.name.toLowerCase(), skill]),
               );
-              const usageStats = showStats
-                ? await readSkillUsageStats({ api, agentId })
-                : undefined;
+              const matchedHits = hits.flatMap((hit) => {
+                const skill = inventoryByName.get(hit.name.toLowerCase());
+                return skill ? [{ hit, skill }] : [];
+              });
+              const relatedSkills =
+                showRelated && matchedHits.length > 0
+                  ? await relatedSkillsBySkillName(inventory, api)
+                  : undefined;
+              const usageStats =
+                showStats && matchedHits.length > 0
+                  ? await readSkillUsageStats({ api, agentId })
+                  : undefined;
 
-              const skills = hits
-                .map((hit) => {
-                  const skill = inventoryByName.get(hit.name.toLowerCase());
-                  if (!skill) return;
+              const skills = matchedHits
+                .map(({ hit, skill }) => {
+                  const allRelated = relatedSkills
+                    ? (relatedSkills.get(skill.name.toLowerCase()) ?? [])
+                    : undefined;
                   return {
                     name: skill.name,
                     description: skill.description,
@@ -313,18 +332,17 @@ export function registerSkillTools(
                     ...(showEvidence && hit.evidence
                       ? { evidence: hit.evidence }
                       : {}),
-                    ...(showRelated && relatedSkills
+                    ...(allRelated
                       ? {
-                          related_skills:
-                            relatedSkills.get(skill.name.toLowerCase()) ?? [],
+                          related_skills: allRelated.slice(
+                            0,
+                            MAX_SKILL_SEARCH_RELATED,
+                          ),
+                          related_skills_total: allRelated.length,
                         }
                       : {}),
                   };
                 })
-                .filter(
-                  (skill): skill is NonNullable<typeof skill> =>
-                    skill !== undefined,
-                )
                 .sort((left, right) => {
                   if (right.score !== left.score)
                     return right.score - left.score;
