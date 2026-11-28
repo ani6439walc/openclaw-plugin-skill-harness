@@ -287,10 +287,14 @@ function countEligibleCollectionFiles(collectionRoot, matchesName) {
       return;
     }
     for (const entry of entries) {
-      if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
+      if (
+        entry.name.startsWith(".") ||
+        entry.isSymbolicLink() ||
+        QMD_EXCLUDE_DIRS.has(entry.name)
+      )
+        continue;
       const target = path.join(directory, entry.name);
       if (entry.isDirectory()) {
-        if (QMD_EXCLUDE_DIRS.has(entry.name)) continue;
         visit(target);
       } else if (entry.isFile()) {
         if (!matchesName(entry.name)) continue;
@@ -341,10 +345,24 @@ function tableColumns(db, tableName) {
   }
 }
 
+function qmdVecLayoutKind(db) {
+  const rows = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('vectors_vec', 'vectors_by_collection')",
+    )
+    .all();
+  if (rows.some((row) => row.name === "vectors_vec")) return "legacy";
+  if (rows.some((row) => row.name === "vectors_by_collection"))
+    return "partitioned";
+  return "none";
+}
+
 function evaluateQmdVectorCoverage(db, indexedDocuments, indexedVectors) {
   const docCols = tableColumns(db, "documents");
   const vecCols = tableColumns(db, "content_vectors");
   const stateCols = tableColumns(db, "embedding_index_state");
+  const vecRowCols = tableColumns(db, "vector_rows");
+  const colIdCols = tableColumns(db, "vector_collection_ids");
   if (!docCols.has("active") || vecCols.size === 0) return null;
 
   // Minimal synthetic fixtures without hash columns fall back to row counts.
@@ -370,13 +388,18 @@ function evaluateQmdVectorCoverage(db, indexedDocuments, indexedVectors) {
   }
 
   // Full QMD schema: verify chunk completeness, stored embedding identity,
-  // orphan cleanup, and partitioned vector_rows parity when present.
+  // orphan cleanup, and active-layout partition parity.
+  const layoutKind = qmdVecLayoutKind(db);
   const hasSeq = vecCols.has("seq");
   const hasIdentity =
     vecCols.has("model") &&
     vecCols.has("embed_fingerprint") &&
     stateCols.has("model") &&
     stateCols.has("fingerprint");
+  const countPartitionRows = () =>
+    vecRowCols.size > 0
+      ? db.prepare("SELECT COUNT(*) AS count FROM vector_rows").get().count
+      : 0;
 
   let identityFilter = "";
   let identityParams = [];
@@ -392,7 +415,13 @@ function evaluateQmdVectorCoverage(db, indexedDocuments, indexedVectors) {
       typeof stored.model !== "string" ||
       typeof stored.fingerprint !== "string"
     ) {
-      return indexedDocuments === 0 && indexedVectors === 0;
+      const leftoverPartitionRows =
+        layoutKind === "legacy" ? 0 : countPartitionRows();
+      return (
+        indexedDocuments === 0 &&
+        indexedVectors === 0 &&
+        leftoverPartitionRows === 0
+      );
     }
     const wrongIdentity = db
       .prepare(
@@ -457,28 +486,52 @@ function evaluateQmdVectorCoverage(db, indexedDocuments, indexedVectors) {
     .get().count;
   if (orphan > 0) return false;
 
-  const vecRowCols = tableColumns(db, "vector_rows");
-  if (hasSeq && vecRowCols.has("hash") && vecRowCols.has("seq")) {
-    const metadataOnly = db
+  // Match QMD vecLayout precedence: legacy vectors_vec wins while present, so
+  // empty staging rows in vector_rows must not be treated as missing vectors.
+  if (layoutKind === "partitioned") {
+    if (
+      !hasSeq ||
+      !docCols.has("collection") ||
+      !vecRowCols.has("hash") ||
+      !vecRowCols.has("seq") ||
+      !vecRowCols.has("collection_id") ||
+      !colIdCols.has("id") ||
+      !colIdCols.has("name")
+    ) {
+      return false;
+    }
+    const missingPartition = db
       .prepare(
         `SELECT COUNT(*) AS count
         FROM content_vectors cv
-        WHERE EXISTS (SELECT 1 FROM documents d WHERE d.hash = cv.hash AND d.active = 1)
-          AND NOT EXISTS (SELECT 1 FROM vector_rows vr WHERE vr.hash = cv.hash AND vr.seq = cv.seq)`,
+        JOIN (SELECT DISTINCT hash, collection FROM documents WHERE active = 1) d
+          ON d.hash = cv.hash
+        LEFT JOIN vector_collection_ids ci ON ci.name = d.collection
+        LEFT JOIN vector_rows vr
+          ON vr.hash = cv.hash AND vr.seq = cv.seq AND vr.collection_id = ci.id
+        WHERE vr.hash IS NULL`,
       )
       .get().count;
-    if (metadataOnly > 0) return false;
-    const vectorOnly = db
+    if (missingPartition > 0) return false;
+    const extraPartition = db
       .prepare(
-        `SELECT COUNT(*) AS count FROM (
-          SELECT DISTINCT hash, seq FROM vector_rows
-        ) vr
+        `SELECT COUNT(*) AS count
+        FROM vector_rows vr
+        LEFT JOIN vector_collection_ids ci ON ci.id = vr.collection_id
         WHERE NOT EXISTS (
-          SELECT 1 FROM content_vectors cv WHERE cv.hash = vr.hash AND cv.seq = vr.seq
+          SELECT 1 FROM content_vectors cv
+          WHERE cv.hash = vr.hash AND cv.seq = vr.seq
+        )
+        OR ci.name IS NULL
+        OR NOT EXISTS (
+          SELECT 1 FROM documents d
+          WHERE d.active = 1 AND d.hash = vr.hash AND d.collection = ci.name
         )`,
       )
       .get().count;
-    if (vectorOnly > 0) return false;
+    if (extraPartition > 0) return false;
+  } else if (layoutKind === "none" && vecRowCols.size > 0) {
+    if (countPartitionRows() > 0 || (indexedVectors ?? 0) > 0) return false;
   }
 
   return true;
