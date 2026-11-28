@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   appendImportedRelations,
+  createRelationGraphResolver,
   readSkillIdentity,
   resolveRelationGraph,
   replayRelationGraph,
@@ -563,4 +564,56 @@ it("rejects executable frontmatter in readSkillIdentity without running code", a
   } finally {
     delete globals[sentinelKey];
   }
+});
+
+it("keeps a single graph snapshot across scoped resolver calls even after disk replacement", async () => {
+  const alpha = await skill("alpha");
+  const beta = await skill("beta");
+  const gamma = await skill("gamma");
+  const all = [alpha, beta, gamma];
+  const alphaId = (await readSkillIdentity(alpha))!;
+  const betaId = (await readSkillIdentity(beta))!;
+  const gammaId = (await readSkillIdentity(gamma))!;
+
+  await appendImportedRelations(root, [
+    { from: alphaId, to: betaId, type: "composes_with", reason: "rev-1" },
+  ]);
+
+  const resolver = await createRelationGraphResolver(root, all);
+  const first = await resolver.resolve(["alpha"]);
+  expect(first.get("alpha")).toEqual([
+    expect.objectContaining({ name: "beta", reason: "rev-1" }),
+  ]);
+
+  // Replace graph.jsonl with a new revision removing alpha->beta and adding gamma->beta.
+  await fs.rm(relationGraphPath(root), { force: true });
+  await appendImportedRelations(root, [
+    { from: gammaId, to: betaId, type: "depends_on", reason: "rev-2" },
+  ]);
+
+  const readSpy = vi.spyOn(fs, "readFile");
+  try {
+    const second = await resolver.resolve(["beta"]);
+    expect(second.get("beta")).toEqual([
+      expect.objectContaining({
+        name: "alpha",
+        reason: "rev-1",
+        direction: "related-to-current",
+      }),
+    ]);
+    // Both alpha and beta identities were already verified in pass 1.
+    expect(readSpy).not.toHaveBeenCalled();
+  } finally {
+    readSpy.mockRestore();
+  }
+
+  // A fresh resolver observes the replacement revision cleanly.
+  const fresh = await resolveRelationGraph(root, all, { focusNames: ["beta"] });
+  expect(fresh.get("beta")).toEqual([
+    expect.objectContaining({
+      name: "gamma",
+      reason: "rev-2",
+      direction: "related-to-current",
+    }),
+  ]);
 });

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { DatabaseSync } from "node:sqlite";
@@ -230,6 +231,79 @@ function countFiles(root) {
   const files = walk(root).filter(isFile);
   return [files.length, sum(files.map((target) => fs.statSync(target).size))];
 }
+const QMD_EXCLUDE_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".cache",
+  "vendor",
+  "dist",
+  "build",
+]);
+const QMD_MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+function isNonBlankQmdFile(target, size) {
+  if (size <= 0 || size > QMD_MAX_FILE_SIZE) return false;
+  let fd;
+  try {
+    fd = fs.openSync(target, "r");
+    const buffer = Buffer.alloc(Math.min(size, 4096));
+    const decoder = new StringDecoder("utf8");
+    let offset = 0;
+    while (offset < size) {
+      const read = fs.readSync(
+        fd,
+        buffer,
+        0,
+        Math.min(buffer.length, size - offset),
+        offset,
+      );
+      if (read <= 0) break;
+      if (decoder.write(buffer.subarray(0, read)).trim().length > 0)
+        return true;
+      offset += read;
+    }
+    return decoder.end().trim().length > 0;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+function countEligibleCollectionFiles(collectionRoot, matchesName) {
+  let rootReal;
+  try {
+    rootReal = fs.realpathSync(collectionRoot);
+    if (!fs.statSync(rootReal).isDirectory()) return 0;
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  function visit(directory) {
+    let entries;
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (QMD_EXCLUDE_DIRS.has(entry.name)) continue;
+        visit(target);
+      } else if (entry.isFile()) {
+        if (!matchesName(entry.name)) continue;
+        const info = stat(target);
+        if (!info?.isFile()) continue;
+        if (isNonBlankQmdFile(target, info.size)) count++;
+      }
+    }
+  }
+  visit(rootReal);
+  return count;
+}
+
 function countSkillSnapshotFiles(snapshotRoot) {
   const metaRoot = path.join(snapshotRoot, "meta");
   const bodyRoot = path.join(snapshotRoot, "body");
@@ -243,32 +317,173 @@ function countSkillSnapshotFiles(snapshotRoot) {
       (target) => isFile(target) && target.endsWith(".md"),
     ).length;
   }
-  const hasHiddenSegment = (base, target) =>
-    path
-      .relative(base, target)
-      .split(path.sep)
-      .some((segment) => segment.startsWith("."));
-  const metaFiles = walk(metaRoot).filter(
-    (target) =>
-      isFile(target) &&
-      path.basename(target) === "meta.md" &&
-      !hasHiddenSegment(metaRoot, target),
-  ).length;
-  const bodyFiles = walk(bodyRoot).filter(
-    (target) =>
-      isFile(target) &&
-      path.basename(target) === "SKILL.md" &&
-      !hasHiddenSegment(bodyRoot, target),
-  ).length;
-  const refFiles = walk(refsRoot).filter(
-    (target) =>
-      isFile(target) &&
-      !hasHiddenSegment(refsRoot, target) &&
-      !target.endsWith(".identity.json") &&
-      !target.endsWith(".identity.yml"),
-  ).length;
-  return metaFiles + bodyFiles + refFiles;
+  return (
+    countEligibleCollectionFiles(metaRoot, (name) => name === "meta.md") +
+    countEligibleCollectionFiles(bodyRoot, (name) => name === "SKILL.md") +
+    countEligibleCollectionFiles(
+      refsRoot,
+      (name) =>
+        !name.endsWith(".identity.json") && !name.endsWith(".identity.yml"),
+    )
+  );
 }
+
+function tableColumns(db, tableName) {
+  try {
+    return new Set(
+      db
+        .prepare(`PRAGMA table_info(${tableName})`)
+        .all()
+        .map((row) => row.name),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function evaluateQmdVectorCoverage(db, indexedDocuments, indexedVectors) {
+  const docCols = tableColumns(db, "documents");
+  const vecCols = tableColumns(db, "content_vectors");
+  const stateCols = tableColumns(db, "embedding_index_state");
+  if (!docCols.has("active") || vecCols.size === 0) return null;
+
+  // Minimal synthetic fixtures without hash columns fall back to row counts.
+  if (!docCols.has("hash") || !vecCols.has("hash")) {
+    return indexedDocuments !== null && indexedVectors !== null
+      ? indexedDocuments === indexedVectors
+      : null;
+  }
+
+  // Schemas with hash columns but without chunk metadata check hash presence.
+  if (!vecCols.has("total_chunks")) {
+    const coverage = db
+      .prepare(
+        `SELECT
+          (SELECT COUNT(*) FROM documents d
+            WHERE d.active = 1
+              AND NOT EXISTS (SELECT 1 FROM content_vectors v WHERE v.hash = d.hash)) AS missing,
+          (SELECT COUNT(*) FROM content_vectors v
+            WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.active = 1 AND d.hash = v.hash)) AS orphan`,
+      )
+      .get();
+    return coverage.missing === 0 && coverage.orphan === 0;
+  }
+
+  // Full QMD schema: verify chunk completeness, stored embedding identity,
+  // orphan cleanup, and partitioned vector_rows parity when present.
+  const hasSeq = vecCols.has("seq");
+  const hasIdentity =
+    vecCols.has("model") &&
+    vecCols.has("embed_fingerprint") &&
+    stateCols.has("model") &&
+    stateCols.has("fingerprint");
+
+  let identityFilter = "";
+  let identityParams = [];
+  let identityGroupCols = "hash";
+  if (hasIdentity) {
+    const stored = db
+      .prepare(
+        "SELECT model, fingerprint FROM embedding_index_state WHERE singleton = 1",
+      )
+      .get();
+    if (
+      !stored ||
+      typeof stored.model !== "string" ||
+      typeof stored.fingerprint !== "string"
+    ) {
+      return indexedDocuments === 0 && indexedVectors === 0;
+    }
+    const wrongIdentity = db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM content_vectors WHERE model != ? OR embed_fingerprint != ?",
+      )
+      .get(stored.model, stored.fingerprint).count;
+    if (wrongIdentity > 0) return false;
+    identityFilter = "WHERE model = ? AND embed_fingerprint = ?";
+    identityParams = [stored.model, stored.fingerprint];
+    identityGroupCols = "hash, model, embed_fingerprint";
+  }
+
+  const completeSeqClause = hasSeq
+    ? "AND MIN(seq) = 0 AND MAX(seq) = MAX(total_chunks) - 1 AND COUNT(DISTINCT seq) = MAX(total_chunks)"
+    : "";
+  const incompleteSeqClause = hasSeq
+    ? "OR MIN(seq) <> 0 OR MAX(seq) <> MAX(total_chunks) - 1 OR COUNT(DISTINCT seq) <> MAX(total_chunks)"
+    : "";
+
+  const pending = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+      FROM documents d
+      LEFT JOIN (
+        SELECT hash
+        FROM content_vectors
+        ${identityFilter}
+        GROUP BY hash
+        HAVING MAX(total_chunks) >= 1
+          AND MIN(total_chunks) = MAX(total_chunks)
+          AND COUNT(*) = MAX(total_chunks)
+          ${completeSeqClause}
+      ) complete ON complete.hash = d.hash
+      WHERE d.active = 1 AND complete.hash IS NULL`,
+    )
+    .get(...identityParams).count;
+  if (pending > 0) return false;
+
+  const incomplete = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM (
+        SELECT hash
+        FROM content_vectors
+        GROUP BY ${identityGroupCols}
+        HAVING MAX(total_chunks) < 1
+          OR MIN(total_chunks) <> MAX(total_chunks)
+          OR COUNT(*) <> MAX(total_chunks)
+          ${incompleteSeqClause}
+      )`,
+    )
+    .get().count;
+  if (incomplete > 0) return false;
+
+  const orphan = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+      FROM content_vectors v
+      WHERE NOT EXISTS (
+        SELECT 1 FROM documents d WHERE d.active = 1 AND d.hash = v.hash
+      )`,
+    )
+    .get().count;
+  if (orphan > 0) return false;
+
+  const vecRowCols = tableColumns(db, "vector_rows");
+  if (hasSeq && vecRowCols.has("hash") && vecRowCols.has("seq")) {
+    const metadataOnly = db
+      .prepare(
+        `SELECT COUNT(*) AS count
+        FROM content_vectors cv
+        WHERE EXISTS (SELECT 1 FROM documents d WHERE d.hash = cv.hash AND d.active = 1)
+          AND NOT EXISTS (SELECT 1 FROM vector_rows vr WHERE vr.hash = cv.hash AND vr.seq = cv.seq)`,
+      )
+      .get().count;
+    if (metadataOnly > 0) return false;
+    const vectorOnly = db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM (
+          SELECT DISTINCT hash, seq FROM vector_rows
+        ) vr
+        WHERE NOT EXISTS (
+          SELECT 1 FROM content_vectors cv WHERE cv.hash = vr.hash AND cv.seq = vr.seq
+        )`,
+      )
+      .get().count;
+    if (vectorOnly > 0) return false;
+  }
+
+  return true;
+}
+
 function qmdDatabaseHealth(snapshotRoot, databasePath) {
   const snapshotIndexedFiles = countSkillSnapshotFiles(snapshotRoot);
   const unavailable = {
@@ -284,7 +499,11 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
   };
   if (!isFile(databasePath)) return unavailable;
   let db;
-  let integrityCheck, state, indexedDocuments, indexedVectors, vectorCoverage;
+  let integrityCheck,
+    state,
+    indexedDocuments,
+    indexedVectors,
+    documentsMatchVectors;
   try {
     db = new DatabaseSync(databasePath, { readOnly: true });
     integrityCheck = Object.values(
@@ -304,32 +523,18 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
       "SELECT COUNT(*) AS count FROM documents WHERE active = 1",
     );
     const vectors = optional("SELECT COUNT(*) AS count FROM content_vectors");
-    // QMD deduplicates documents by content hash and chunks long documents into
-    // multiple content_vectors rows per hash, so verify hash coverage when the
-    // hash columns exist and fall back to row counts on minimal fixtures.
-    vectorCoverage = optional(
-      `SELECT
-        (SELECT COUNT(*) FROM documents d
-          WHERE d.active = 1
-            AND NOT EXISTS (SELECT 1 FROM content_vectors v WHERE v.hash = d.hash)) AS missing,
-        (SELECT COUNT(*) FROM content_vectors v
-          WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.active = 1 AND d.hash = v.hash)) AS orphan`,
-    );
     indexedDocuments = docs?.count ?? null;
     indexedVectors = vectors?.count ?? null;
+    documentsMatchVectors = evaluateQmdVectorCoverage(
+      db,
+      indexedDocuments,
+      indexedVectors,
+    );
   } catch {
     return unavailable;
   } finally {
     if (db) db.close();
   }
-  const documentsMatchVectors =
-    vectorCoverage !== null &&
-    typeof vectorCoverage.missing === "number" &&
-    typeof vectorCoverage.orphan === "number"
-      ? vectorCoverage.missing === 0 && vectorCoverage.orphan === 0
-      : indexedDocuments !== null && indexedVectors !== null
-        ? indexedDocuments === indexedVectors
-        : null;
   return {
     databaseStatus: state?.status ?? "unknown",
     integrityCheck,

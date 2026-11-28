@@ -7,7 +7,7 @@ import {
   expandRelatedCandidates,
   collectRelationEvidence,
 } from "../skills/related.js";
-import { resolveRelationGraph } from "../skills/relation-graph.js";
+import { createRelationGraphResolver } from "../skills/relation-graph.js";
 import { canonicalIdentity, roundToDecimals } from "../normalize.js";
 import type {
   InputSkillDiscovery,
@@ -1766,18 +1766,18 @@ export function createHookHandlers(deps: HookDeps) {
                   refreshedConfig.routing.skills.maxInjectedSkills,
               });
 
-              const relationGraph =
+              const graphResolver =
                 unionPool.candidateSkills.length > 0 && deps.dataRoot
-                  ? await resolveRelationGraph(
+                  ? await createRelationGraphResolver(
                       deps.dataRoot,
                       skillDiscoveryResult.visibleSkills,
-                      {
-                        focusNames: unionPool.candidateSkills.map(
-                          (skill) => skill.name,
-                        ),
-                      },
                     )
-                  : new Map();
+                  : undefined;
+              const relationGraph = graphResolver
+                ? await graphResolver.resolve(
+                    unionPool.candidateSkills.map((skill) => skill.name),
+                  )
+                : new Map();
               const related = expandRelatedCandidates(
                 unionPool.candidateSkills,
                 skillDiscoveryResult.visibleSkills,
@@ -1792,12 +1792,10 @@ export function createHookHandlers(deps: HookDeps) {
                 visibleSkills: skillDiscoveryResult.visibleSkills,
                 enabled: true,
               });
-              if (related.added.length > 0 && deps.dataRoot) {
+              if (related.added.length > 0 && graphResolver) {
                 assertActive();
-                const expandedGraph = await resolveRelationGraph(
-                  deps.dataRoot,
-                  skillDiscoveryResult.visibleSkills,
-                  { focusNames: related.added },
+                const expandedGraph = await graphResolver.resolve(
+                  related.added,
                 );
                 for (const [key, edges] of expandedGraph) {
                   if (!relationGraph.has(key)) relationGraph.set(key, edges);
