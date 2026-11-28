@@ -144,14 +144,22 @@ touch an original seed and stay inside the parent-admitted manifest. Skill conte
 justify changes without an execution trial; recommendation/search scores or
 co-loading alone cannot. Prefer specific documented types (`depends_on`,
 `composes_with`, `specializes`, `conflicts_with`, `similar_to`) over generic
-`related`, treat `related` as a last resort, and upgrade overly broad existing
-`related` edges when both endpoints support a narrower predicate. Require
-explicit necessity for `depends_on` (do not stretch `composes_with` into
-`depends_on`); deletion requires contradiction, duplication or supersession,
-not lack of usage or search hits. Do not introduce confidence levels or restore
-verification-status fields.
+`related`, prioritize structural/workflow links (`depends_on`, `composes_with`,
+`specializes`, `conflicts_with`) before `similar_to` during discovery, treat
+`related` as a last resort, and upgrade overly broad existing `related` edges
+when both endpoints support a narrower predicate. Require explicit necessity for
+`depends_on` (do not stretch `composes_with` into `depends_on`); deletion requires
+endpoint-document evidence of contradiction, duplication, supersession, or no
+concrete documented workflow/structural/alternative link (such as wrong-target
+matches, superficial keyword overlap, or unsupported imported reasons), never lack
+of usage or search hits alone. Consolidate redundant bidirectional symmetric edges
+(`similar_to`, `conflicts_with`, `related`) by updating one edge if needed and
+deleting the redundant reverse edge, and fix reversed asymmetric edges
+(`depends_on`, `specializes`) with `delete` + `create` (or `delete` + `update`
+when the opposite edge already exists). Do not introduce confidence levels or
+restore verification-status fields.
 
-Prepare at most four existing-neighbor attempts, rotating a sorted neighbor list with a persisted cursor keyed by the captured seed-ID group. Keep at most 256 cursor entries in `review.json`; advance only in the same locked atomic write as a new event. This rotates preparation, not proven model attention, and does not guarantee coverage when groups or catalogs change. Do not derive cursors from unbounded event history.
+Prepare at most four existing-neighbor attempts, rotating a priority-sorted neighbor list (unreviewed `related` edges first, then other unreviewed imported edges, then already-reviewed edges, alphabetically within each tier) with a persisted cursor keyed by the captured seed-ID group, and reconcile the cursor offset in memory after applying Review changes so upgraded or deleted neighbors do not skip uninspected neighbors on the next run. Keep at most 256 cursor entries in `review.json`; advance only in the same locked atomic write as a new event. This rotates preparation, not proven model attention, and does not guarantee coverage when groups or catalogs change. Do not derive cursors from unbounded event history.
 
 Discovery belongs to the reviewer: at most four `skill_search` calls per run, then `skill_view` admits chosen visible registered endpoints under the shared eight-extra-attempt budget. Preserve failed-attempt accounting, repeated-read snapshot identity, and 256 KiB/file plus 2 MiB aggregate evidence limits. Admission must serialize, check cancellation around I/O, and capture new pair revisions without refreshing previously observed pairs. Support files and ineligible reads are not relation evidence; unregistered skills inside the agent's known OpenClaw skill roots (`resolveSkillRoots`) are auto-registered into `sources.json`, while skills outside known roots remain ineligible without allocating identities.
 
