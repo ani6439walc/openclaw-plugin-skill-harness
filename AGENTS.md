@@ -206,12 +206,12 @@ new skill selection thresholds or fallback injection. `relatedCandidates` is opt
 session/event diagnostics; `related-declared` injection contributes to pool
 counts only, never QMD or collection attribution. Do not recalculate old stats.
 
-Both expansion and relevance scoring prioritize `depends_on`, `composes_with`,
+Both expansion, relevance scoring, and resolved tool relation lists (`skill_view`, `skill_list`, `skill_search`) prioritize `depends_on`, `composes_with`,
 `specializes`, `conflicts_with`, `similar_to`, and `related` in that order.
 Unrecognized types rank last. Within the same type,
 Review provenance comes before author imports and unspecified sources. Break
 remaining ties with locale comparison of the neighbor name, direction, then
-relation type. Apply this order within each expansion seed or scoring candidate
+relation type. Apply this order within each resolved skill list, expansion seed, or scoring candidate
 before enforcing its limits.
 
 Collect relation relevance evidence independently
@@ -328,9 +328,9 @@ metadata before verifying the formal graph through the invoking agent's tools.
 
 ## Detailed tool contracts
 
-- **`skill_list`** lists visible skills with pagination. Optional inputs: `offset` (default `0`), `limit` (default `150`, capped at `500`), `show_stats` and `show_related` (both default `false`). Returns `{ success, total, count, offset, limit, has_more, next_offset?, skills }`. Each skill includes `name`, `description`, `source`, and `path`, with optional `usage_stats` and `related_skills`.
-- **`skill_search`** searches metadata, bodies, and references. Requires a non-empty `query` (trimmed and truncated to 1,000 Unicode code points). Optional inputs: `limit` (default `20`, capped at `100`), `show_evidence` (default `true`), `show_stats` and `show_related` (default `false`). Returns `{ success, query, total, count, limit, skills }`; each skill contains `name`, `description`, `source`, `score`, and requested optional evidence/statistics/relations. Search results omit paths; use `skill_list` or `skill_view` for paths. An unavailable index returns `success: false`.
-- **`skill_view`** requires `name`; optional `file_path` reads a relative support file under `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`. A full skill response includes `success`, `name`, `description`, `content`, `path`, `skill_dir`, `linked_files`, usage statistics, relations, source, and readiness. A support-file response includes `success`, `name`, `file`, `content`, `file_type`, and relations.
+- **`skill_list`** lists visible skills with pagination. Optional inputs: `offset` (default `0`), `limit` (default `150`, capped at `500`), `show_stats` and `show_related` (both default `false`). Returns `{ success, total, count, offset, limit, has_more, next_offset?, skills }`. Each skill includes `name`, `description`, `source`, and `path`, with optional `usage_stats` and `related_skills` (sorted by relation priority).
+- **`skill_search`** searches metadata, bodies, and references. Requires a non-empty `query` (trimmed and truncated to 1,000 Unicode code points). Optional inputs: `limit` (default `20`, capped at `100`), `show_evidence` (default `true`), `show_stats` (default `false`), and `show_related` (default `true`). Returns `{ success, query, total, count, limit, skills }`; each skill contains `name`, `description`, `source`, `score`, and requested optional evidence/statistics/relations. When `show_related` is `true`, each skill includes up to 3 top-ranked `related_skills` plus `related_skills_total` (use `skill_view` for the complete list); when `false`, both fields are omitted. Search results omit paths; use `skill_list` or `skill_view` for paths. An unavailable index returns `success: false`.
+- **`skill_view`** requires `name`; optional `file_path` reads a relative support file under `references/`, `templates/`, `scripts/`, `assets/`, or `examples/`. A full skill response includes `success`, `name`, `description`, `content`, `path`, `skill_dir`, `linked_files`, usage statistics, all direct `related_skills` (sorted by relation priority), source, and readiness. A support-file response includes `success`, `name`, `file`, `content`, `file_type`, and `related_skills`.
 
 ## Relation Review execution
 

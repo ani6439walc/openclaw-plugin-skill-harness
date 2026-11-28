@@ -926,7 +926,7 @@ describe("registerSkillTools", () => {
     ]);
   });
 
-  it("includes direct related skills in skill_search when show_related is true", async () => {
+  it("includes top-3 ranked related skills and total in skill_search by default, and omits both when show_related is false", async () => {
     const workspaceDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "skill-tools-search-related-"),
     );
@@ -934,47 +934,207 @@ describe("registerSkillTools", () => {
       path.join(os.tmpdir(), "skill-tools-search-related-state-"),
     );
     try {
-      writeSkill(workspaceDir, "react", {
-        nextjs: "React is used by Next.js.",
+      const dataRoot = path.join(stateDir, "plugins", "skill-harness");
+      const names = [
+        "hub",
+        "orphan",
+        "a-related",
+        "b-similar",
+        "x-imported-compose",
+        "y-reviewed-compose",
+        "z-depends",
+      ];
+      for (const name of names) writeSkill(workspaceDir, name);
+      const source = await registerRelationSource(dataRoot, {
+        id: "github:example/search-related",
+        root: path.join(workspaceDir, "skills"),
+        skills: Object.fromEntries(
+          names.map((name) => [
+            name,
+            { name, source_path: `${name}/SKILL.md` },
+          ]),
+        ),
       });
-      writeSkill(workspaceDir, "nextjs");
-      await seedRelation(
-        stateDir,
-        workspaceDir,
-        "react",
-        workspaceDir,
-        "nextjs",
-        "React is used by Next.js.",
+      const registry = { version: 1 as const, sources: [source] };
+      const identities = new Map(
+        await Promise.all(
+          names.map(async (name) => {
+            const location = path.join(
+              workspaceDir,
+              "skills",
+              name,
+              "SKILL.md",
+            );
+            const identity = await readSkillIdentity(
+              { name, location },
+              registry,
+            );
+            expect(identity).toBeDefined();
+            return [name, { identity: identity!, location }] as const;
+          }),
+        ),
       );
+      const hub = identities.get("hub")!;
+      await appendImportedRelations(dataRoot, [
+        {
+          from: hub.identity,
+          to: identities.get("a-related")!.identity,
+          type: "related",
+          reason: "Broad related link.",
+        },
+        {
+          from: hub.identity,
+          to: identities.get("b-similar")!.identity,
+          type: "similar_to",
+          reason: "Overlapping alternative.",
+        },
+        {
+          from: hub.identity,
+          to: identities.get("x-imported-compose")!.identity,
+          type: "composes_with",
+          reason: "Imported workflow handoff.",
+        },
+        {
+          from: hub.identity,
+          to: identities.get("z-depends")!.identity,
+          type: "depends_on",
+          reason: "Explicit prerequisite.",
+        },
+      ]);
+      const reviewedTarget = identities.get("y-reviewed-compose")!;
+      await applyRelationReviewChanges(
+        dataRoot,
+        [
+          {
+            operation: "create",
+            from: hub.identity,
+            to: reviewedTarget.identity,
+            expected: null,
+            type: "composes_with",
+            reason: "Reviewed workflow handoff.",
+            rationale: "Both docs describe a verified workflow handoff.",
+            evidence: [hub, reviewedTarget].map((entry) => ({
+              skillId: entry.identity.id,
+              filePath: "SKILL.md",
+              startLine: 6,
+              endLine: 6,
+              quote: `# ${entry.identity.name}`,
+              fileDigest: createHash("sha256")
+                .update(fs.readFileSync(entry.location))
+                .digest("hex"),
+            })),
+          },
+        ],
+        {
+          batchId: "search-related-review-batch",
+          eventId: "search-related-review-event",
+          agentId: "main",
+          assertCurrent: async () => {},
+        },
+      );
+
       const api = createApi(stateDir, workspaceDir);
       const qmdSkillIndex: SkillQmdIndex = {
         schedule: vi.fn(),
-        search: vi.fn(async () => [{ name: "react", score: 0.95 }]),
+        search: vi.fn(async () => [
+          { name: "hub", score: 0.95 },
+          { name: "z-depends", score: 0.7 },
+          { name: "orphan", score: 0.5 },
+        ]),
         getStatus: vi.fn(() => "ready"),
         close: vi.fn(async () => {}),
       };
-      registerSkillTools(api, { qmdSkillIndex });
-      const search = toolsForAgent(api, "main").get("skill_search");
+      registerSkillTools(api, {
+        qmdSkillIndex,
+        bundledSkillsDir: "",
+        homeDir: path.join(stateDir, "home"),
+      });
+      const tools = toolsForAgent(api, "main");
+      const search = tools.get("skill_search");
+      const view = tools.get("skill_view");
+      const list = tools.get("skill_list");
       expect(search).toBeTruthy();
 
-      const withoutRelated = await runTool(search, {
-        query: "react",
-      });
-      expect(withoutRelated.skills[0]).not.toHaveProperty("related_skills");
-
-      const withRelated = await runTool(search, {
-        query: "react",
-        show_related: true,
-      });
-      expect(withRelated.skills[0]).toMatchObject({
-        name: "react",
+      const defaultResult = await runTool(search, { query: "hub" });
+      expect(defaultResult.skills[0]).toMatchObject({
+        name: "hub",
+        related_skills_total: 5,
         related_skills: [
           {
-            name: "nextjs",
-            reason: "React is used by Next.js.",
+            name: "z-depends",
+            relation_type: "depends_on",
+            source: "author-import",
+            direction: "current-to-related",
+          },
+          {
+            name: "y-reviewed-compose",
+            relation_type: "composes_with",
+            source: "review",
+            direction: "current-to-related",
+          },
+          {
+            name: "x-imported-compose",
+            relation_type: "composes_with",
+            source: "author-import",
             direction: "current-to-related",
           },
         ],
+      });
+      expect(defaultResult.skills[0].related_skills).toHaveLength(3);
+      expect(defaultResult.skills[1]).toMatchObject({
+        name: "z-depends",
+        related_skills_total: 1,
+        related_skills: [
+          {
+            name: "hub",
+            relation_type: "depends_on",
+            source: "author-import",
+            direction: "related-to-current",
+          },
+        ],
+      });
+      expect(defaultResult.skills[2]).toMatchObject({
+        name: "orphan",
+        related_skills: [],
+        related_skills_total: 0,
+      });
+
+      const withoutRelated = await runTool(search, {
+        query: "hub",
+        show_related: false,
+      });
+      for (const entry of withoutRelated.skills) {
+        expect(entry).not.toHaveProperty("related_skills");
+        expect(entry).not.toHaveProperty("related_skills_total");
+      }
+
+      const expectedFullOrder = [
+        "z-depends",
+        "y-reviewed-compose",
+        "x-imported-compose",
+        "b-similar",
+        "a-related",
+      ];
+      const viewResult = await runTool(view, { name: "hub" });
+      expect(
+        viewResult.related_skills.map((entry: { name: string }) => entry.name),
+      ).toEqual(expectedFullOrder);
+
+      const listWithRelated = await runTool(list, { show_related: true });
+      const hubEntry = listWithRelated.skills.find(
+        (entry: { name: string }) => entry.name === "hub",
+      );
+      expect(
+        hubEntry.related_skills.map((entry: { name: string }) => entry.name),
+      ).toEqual(expectedFullOrder);
+
+      // Fail-open when graph is corrupted.
+      fs.appendFileSync(relationGraphPath(dataRoot), '{"op":');
+      const corruptedResult = await runTool(search, { query: "hub" });
+      expect(corruptedResult.skills[0]).toMatchObject({
+        name: "hub",
+        related_skills: [],
+        related_skills_total: 0,
       });
     } finally {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
