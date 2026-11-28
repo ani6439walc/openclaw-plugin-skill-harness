@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import matter from "gray-matter";
+import { parseInertYamlFrontmatter } from "./frontmatter.js";
 import { withFileLock } from "../file-utils.js";
 import { resolveConfinedFile } from "./paths.js";
 import { canonicalIdentity } from "../normalize.js";
@@ -145,7 +145,7 @@ export async function readSkillIdentity(
     const source = await fs.realpath(path.dirname(skill.location));
     const file = await resolveConfinedFile(source, skill.location);
     if (!file) return;
-    const parsed = matter(await fs.readFile(file, "utf8"));
+    const parsed = parseInertYamlFrontmatter(await fs.readFile(file, "utf8"));
     if (
       typeof parsed.data.name !== "string" ||
       parsed.data.name.trim() !== skill.name
@@ -153,9 +153,10 @@ export async function readSkillIdentity(
       return;
     const data = { ...parsed.data };
     if (object(data.metadata)) {
-      data.metadata = { ...data.metadata };
-      delete data.metadata["related-skills"];
-      if (!Object.keys(data.metadata).length) delete data.metadata;
+      const metadata = { ...data.metadata };
+      delete metadata["related-skills"];
+      if (Object.keys(metadata).length) data.metadata = metadata;
+      else delete data.metadata;
     }
     const fingerprint = hash(stable({ data, content: parsed.content }));
     if (registry) {
@@ -339,111 +340,202 @@ function validProperties(p: Record<string, unknown>): boolean {
         )))
   );
 }
-export async function resolveRelationGraph(
+export interface RelationGraphResolver {
+  resolve(
+    focusNames?: readonly string[],
+  ): Promise<Map<string, GraphRelatedSkill[]>>;
+}
+
+/** Capture one graph and source-registry snapshot for one or more scoped reads. */
+export async function createRelationGraphResolver(
   dataRoot: string,
   skills: readonly { name: string; location: string }[],
   options?: { keyMode?: "canonical" | "exact" },
-): Promise<Map<string, GraphRelatedSkill[]>> {
-  const result = new Map<string, GraphRelatedSkill[]>();
+): Promise<RelationGraphResolver> {
   const graph = await readRelationGraph(dataRoot);
-  if (!graph) return result;
+  if (!graph || graph.relations.length === 0) {
+    return { resolve: async () => new Map() };
+  }
   const registry = readRelationSources(dataRoot);
+  const keyFor = (name: string): string =>
+    options?.keyMode === "exact" ? name.toLowerCase() : canonicalIdentity(name);
+  const availableSkillNames = new Set(skills.map((skill) => skill.name));
+  const nodeCandidates = new Map<string, { name: string; version: 1 | 2 }>();
+  for (const entity of graph.entities.values()) {
+    if (
+      entity.type === "Skill" &&
+      entity.properties.formatVersion === 1 &&
+      typeof entity.properties.name === "string" &&
+      availableSkillNames.has(entity.properties.name)
+    ) {
+      nodeCandidates.set(entity.id, {
+        name: entity.properties.name,
+        version: 1,
+      });
+    }
+  }
+  for (const source of registry?.sources ?? []) {
+    for (const [key, binding] of Object.entries(source.skills)) {
+      if (!availableSkillNames.has(binding.name)) continue;
+      const id = stableSkillId(source.id, key);
+      const entity = graph.entities.get(id);
+      if (
+        entity?.type === "Skill" &&
+        entity.properties.formatVersion === 2 &&
+        entity.properties.source_id === source.id &&
+        entity.properties.skill_key === key
+      ) {
+        nodeCandidates.set(id, { name: binding.name, version: 2 });
+      }
+    }
+  }
   const names = new Map<
     string,
     { name: string; fingerprint: string; version: number }
   >();
-  // Read only skills named by graph nodes, not the whole inventory.
-  const legacyNames = new Set(
-    [...graph.entities.values()]
-      .filter((entity) => entity.properties.formatVersion === 1)
-      .map((entity) => entity.properties.name),
-  );
-  const stableNames = new Set<string>();
-  for (const source of registry?.sources ?? [])
-    for (const [key, binding] of Object.entries(source.skills))
-      if (
-        graph.entities.get(stableSkillId(source.id, key))?.properties
-          .formatVersion === 2
-      )
-        stableNames.add(binding.name);
-  for (const skill of skills) {
-    if (registry && stableNames.has(skill.name)) {
-      const identity = await readSkillIdentity(skill, registry);
-      const node = identity ? graph.entities.get(identity.id) : undefined;
-      if (
-        identity &&
-        node?.type === "Skill" &&
-        node.properties.formatVersion === 2 &&
-        node.properties.source_id === identity.source_id &&
-        node.properties.skill_key === identity.skill_key
-      )
-        names.set(identity.id, {
-          name: skill.name,
-          fingerprint: identity.fingerprint,
-          version: 2,
-        });
-    }
-    if (legacyNames.has(skill.name)) {
-      const identity = await readSkillIdentity(skill);
-      const node = identity ? graph.entities.get(identity.id) : undefined;
-      if (
-        identity &&
-        node?.type === "Skill" &&
-        node.properties.formatVersion === 1 &&
-        node.properties.name === identity.name &&
-        node.properties.source === identity.source &&
-        node.properties.fingerprint === identity.fingerprint
-      )
-        names.set(identity.id, {
-          name: skill.name,
-          fingerprint: identity.fingerprint,
-          version: 1,
-        });
-    }
+  const checkedStable = new Set<number>();
+  const checkedLegacy = new Set<number>();
+
+  return {
+    async resolve(
+      focusNames?: readonly string[],
+    ): Promise<Map<string, GraphRelatedSkill[]>> {
+      const result = new Map<string, GraphRelatedSkill[]>();
+      const focusKeys =
+        focusNames !== undefined ? new Set(focusNames.map(keyFor)) : undefined;
+      if (focusKeys?.size === 0) return result;
+      // Filter to structurally valid, incident edges before reading SKILL.md files.
+      const neededLegacyNames = new Set<string>();
+      const neededStableNames = new Set<string>();
+      const candidateEdges: GraphRelation[] = [];
+      for (const edge of graph.relations) {
+        const from = nodeCandidates.get(edge.from);
+        const to = nodeCandidates.get(edge.to);
+        if (
+          !from ||
+          !to ||
+          canonicalIdentity(from.name) === canonicalIdentity(to.name) ||
+          !relationTypes.includes(edge.rel as RelationType) ||
+          !validProperties(edge.properties) ||
+          from.version !== edge.properties.formatVersion ||
+          to.version !== edge.properties.formatVersion
+        )
+          continue;
+        if (
+          focusKeys &&
+          !focusKeys.has(keyFor(from.name)) &&
+          !focusKeys.has(keyFor(to.name))
+        )
+          continue;
+        candidateEdges.push(edge);
+        for (const endpoint of [from, to]) {
+          if (endpoint.version === 2) neededStableNames.add(endpoint.name);
+          else neededLegacyNames.add(endpoint.name);
+        }
+      }
+      if (candidateEdges.length === 0) return result;
+      for (let index = 0; index < skills.length; index++) {
+        const skill = skills[index]!;
+        if (
+          registry &&
+          neededStableNames.has(skill.name) &&
+          !checkedStable.has(index)
+        ) {
+          checkedStable.add(index);
+          const identity = await readSkillIdentity(skill, registry);
+          const node = identity ? graph.entities.get(identity.id) : undefined;
+          if (
+            identity &&
+            node?.type === "Skill" &&
+            node.properties.formatVersion === 2 &&
+            node.properties.source_id === identity.source_id &&
+            node.properties.skill_key === identity.skill_key
+          )
+            names.set(identity.id, {
+              name: skill.name,
+              fingerprint: identity.fingerprint,
+              version: 2,
+            });
+        }
+        if (neededLegacyNames.has(skill.name) && !checkedLegacy.has(index)) {
+          checkedLegacy.add(index);
+          const identity = await readSkillIdentity(skill);
+          const node = identity ? graph.entities.get(identity.id) : undefined;
+          if (
+            identity &&
+            node?.type === "Skill" &&
+            node.properties.formatVersion === 1 &&
+            node.properties.name === identity.name &&
+            node.properties.source === identity.source &&
+            node.properties.fingerprint === identity.fingerprint
+          )
+            names.set(identity.id, {
+              name: skill.name,
+              fingerprint: identity.fingerprint,
+              version: 1,
+            });
+        }
+      }
+      const seen = new Set<string>();
+      for (const edge of candidateEdges) {
+        const from = names.get(edge.from),
+          to = names.get(edge.to);
+        if (
+          !from ||
+          !to ||
+          canonicalIdentity(from.name) === canonicalIdentity(to.name) ||
+          !relationTypes.includes(edge.rel as RelationType) ||
+          !validProperties(edge.properties) ||
+          from.version !== edge.properties.formatVersion ||
+          to.version !== edge.properties.formatVersion ||
+          (from.version === 2 &&
+            (edge.properties.fromFingerprint !== from.fingerprint ||
+              edge.properties.toFingerprint !== to.fingerprint))
+        )
+          continue;
+        const key = stable([edge.from, edge.rel, edge.to]);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        for (const [name, other, direction] of [
+          [from.name, to.name, "current-to-related"],
+          [to.name, from.name, "related-to-current"],
+        ] as const) {
+          const mapKey = keyFor(name);
+          if (focusKeys && !focusKeys.has(mapKey)) continue;
+          const list = result.get(mapKey) ?? [];
+          list.push({
+            name: other,
+            reason: edge.properties.reason as string,
+            direction,
+            relation_type: edge.rel as RelationType,
+            source: graph.reviewedPairs?.has(stable([edge.from, edge.to]))
+              ? "review"
+              : "author-import",
+          });
+          result.set(mapKey, list);
+        }
+      }
+      for (const list of result.values()) list.sort(compareRelationEdges);
+      return result;
+    },
+  };
+}
+
+export async function resolveRelationGraph(
+  dataRoot: string,
+  skills: readonly { name: string; location: string }[],
+  options?: {
+    keyMode?: "canonical" | "exact";
+    focusNames?: readonly string[];
+  },
+): Promise<Map<string, GraphRelatedSkill[]>> {
+  if (options?.focusNames !== undefined && options.focusNames.length === 0) {
+    return new Map();
   }
-  const seen = new Set<string>();
-  for (const edge of graph.relations) {
-    const from = names.get(edge.from),
-      to = names.get(edge.to);
-    if (
-      !from ||
-      !to ||
-      canonicalIdentity(from.name) === canonicalIdentity(to.name) ||
-      !relationTypes.includes(edge.rel as RelationType) ||
-      !validProperties(edge.properties) ||
-      from.version !== edge.properties.formatVersion ||
-      to.version !== edge.properties.formatVersion ||
-      (from.version === 2 &&
-        (edge.properties.fromFingerprint !== from.fingerprint ||
-          edge.properties.toFingerprint !== to.fingerprint))
-    )
-      continue;
-    const key = stable([edge.from, edge.rel, edge.to]);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    for (const [name, other, direction] of [
-      [from.name, to.name, "current-to-related"],
-      [to.name, from.name, "related-to-current"],
-    ] as const) {
-      const key =
-        options?.keyMode === "exact"
-          ? name.toLowerCase()
-          : canonicalIdentity(name);
-      const list = result.get(key) ?? [];
-      list.push({
-        name: other,
-        reason: edge.properties.reason as string,
-        direction,
-        relation_type: edge.rel as RelationType,
-        source: graph.reviewedPairs?.has(stable([edge.from, edge.to]))
-          ? "review"
-          : "author-import",
-      });
-      result.set(key, list);
-    }
-  }
-  for (const list of result.values()) list.sort(compareRelationEdges);
-  return result;
+  const resolver = await createRelationGraphResolver(dataRoot, skills, {
+    keyMode: options?.keyMode,
+  });
+  return resolver.resolve(options?.focusNames);
 }
 export const relationSchema = `types:\n  Skill:\n    required: [name, source, fingerprint, formatVersion]\nrelations:\n${relationTypes.map((type) => `  ${type}:\n    from_types: [Skill]\n    to_types: [Skill]\n`).join("")}`;
 export const stableRelationSchema = `version: 2

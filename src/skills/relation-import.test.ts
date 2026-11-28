@@ -678,4 +678,26 @@ describe("relation import", () => {
       1,
     );
   });
+  it("rejects executable frontmatter during preflight without executing code", async () => {
+    const sentinelKey = "__skillHarnessImportExecSentinel__";
+    const globals = globalThis as Record<string, unknown>;
+    delete globals[sentinelKey];
+    const dir = await root();
+    const evilDir = path.join(dir, "evil");
+    await fs.mkdir(evilDir, { recursive: true });
+    await fs.writeFile(
+      path.join(evilDir, "SKILL.md"),
+      `---js\n(() => { globalThis.${sentinelKey} = true; return { name: "evil" }; })()\n---\nBody\n`,
+    );
+    try {
+      const result = await preflightRelations(dir);
+      expect(result.skillCount).toBe(0);
+      expect(result.issues).toEqual([
+        { skill: await fs.realpath(evilDir), code: "invalid-skill" },
+      ]);
+      expect(globals[sentinelKey]).toBeUndefined();
+    } finally {
+      delete globals[sentinelKey];
+    }
+  });
 });

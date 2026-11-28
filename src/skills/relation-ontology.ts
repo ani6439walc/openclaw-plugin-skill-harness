@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import matter from "gray-matter";
+import { parseInertYamlFrontmatter } from "./frontmatter.js";
 import { readJsonFile, writeJsonAtomic } from "../file-utils.js";
 import { canonicalIdentity } from "../normalize.js";
 import { resolveConfinedFile } from "./paths.js";
@@ -105,7 +105,13 @@ function sourcePath(value: unknown): value is string {
   );
 }
 function schemaPattern(raw: string, sourceId: string): RegExp {
-  const schema: unknown = matter(`---\n${raw}\n---\n`).data;
+  const normalized = raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
+  let schema: unknown;
+  try {
+    schema = parseInertYamlFrontmatter(`---\n${normalized}\n---\n`).data;
+  } catch {
+    fail("schema-profile");
+  }
   if (
     !object(schema) ||
     schema.version !== 2 ||

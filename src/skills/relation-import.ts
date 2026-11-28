@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import matter from "gray-matter";
+import { parseInertYamlFrontmatter } from "./frontmatter.js";
 import { noul, TypeSafeClient } from "@typesafe-ai/sdk";
 import type { EntryType } from "@typesafe-ai/sdk";
 import type { OpenClawConfig } from "../../api.js";
@@ -118,7 +118,9 @@ export async function preflightRelations(
     );
     if (location) {
       try {
-        const parsed = matter(await fs.readFile(location, "utf8"));
+        const parsed = parseInertYamlFrontmatter(
+          await fs.readFile(location, "utf8"),
+        );
         const name =
           typeof parsed.data.name === "string" ? parsed.data.name.trim() : "";
         if (!name) throw new Error("missing-name");

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   appendImportedRelations,
+  createRelationGraphResolver,
   readSkillIdentity,
   resolveRelationGraph,
   replayRelationGraph,
@@ -449,6 +450,170 @@ it("keeps NFKC-equivalent skill names separated when keyMode is exact", async ()
       name: "target",
       relation_type: "composes_with",
       reason: "fw-only",
+    }),
+  ]);
+});
+
+it("scopes resolveRelationGraph to focusNames without reading unrelated skills", async () => {
+  const a = await skill("a");
+  const b = await skill("b");
+  const c = await skill("c");
+  const d = await skill("d");
+  const isolated = await skill("isolated");
+  const all = [a, b, c, d, isolated];
+  const ids = new Map(
+    await Promise.all(
+      all.map(
+        async (entry) =>
+          [entry.name, (await readSkillIdentity(entry))!] as const,
+      ),
+    ),
+  );
+  await appendImportedRelations(root, [
+    {
+      from: ids.get("a")!,
+      to: ids.get("b")!,
+      type: "composes_with",
+      reason: "ab",
+    },
+    {
+      from: ids.get("c")!,
+      to: ids.get("a")!,
+      type: "depends_on",
+      reason: "ca",
+    },
+    {
+      from: ids.get("b")!,
+      to: ids.get("d")!,
+      type: "similar_to",
+      reason: "bd",
+    },
+  ]);
+
+  const full = await resolveRelationGraph(root, all);
+  const readSpy = vi.spyOn(fs, "readFile");
+  try {
+    const focused = await resolveRelationGraph(root, all, {
+      focusNames: ["a"],
+    });
+    expect([...focused.keys()]).toEqual(["a"]);
+    expect(focused.get("a")).toEqual(full.get("a"));
+    const readPaths = readSpy.mock.calls.map((call) => String(call[0]));
+    expect(readPaths.some((file) => file.endsWith("/d/SKILL.md"))).toBe(false);
+    expect(readPaths.some((file) => file.endsWith("/isolated/SKILL.md"))).toBe(
+      false,
+    );
+
+    readSpy.mockClear();
+    expect(
+      (await resolveRelationGraph(root, all, { focusNames: [] })).size,
+    ).toBe(0);
+    expect(readSpy).not.toHaveBeenCalled();
+  } finally {
+    readSpy.mockRestore();
+  }
+});
+
+it("applies keyMode exact when filtering focusNames for NFKC-equivalent names", async () => {
+  const ascii = await skill("alpha");
+  const fullwidth = await skill("ａｌｐｈａ");
+  const target = await skill("target");
+  const fwId = (await readSkillIdentity(fullwidth))!;
+  const targetId = (await readSkillIdentity(target))!;
+  await appendImportedRelations(root, [
+    { from: fwId, to: targetId, type: "composes_with", reason: "fw-only" },
+  ]);
+  const readSpy = vi.spyOn(fs, "readFile");
+  try {
+    const asciiFocused = await resolveRelationGraph(
+      root,
+      [ascii, fullwidth, target],
+      { keyMode: "exact", focusNames: ["alpha"] },
+    );
+    expect(asciiFocused.size).toBe(0);
+    const readPaths = readSpy.mock.calls.map((call) => String(call[0]));
+    expect(readPaths.some((file) => file.endsWith("SKILL.md"))).toBe(false);
+
+    const fwFocused = await resolveRelationGraph(
+      root,
+      [ascii, fullwidth, target],
+      { keyMode: "exact", focusNames: ["ａｌｐｈａ"] },
+    );
+    expect([...fwFocused.keys()]).toEqual(["ａｌｐｈａ"]);
+    expect(fwFocused.get("ａｌｐｈａ")).toEqual([
+      expect.objectContaining({ name: "target", reason: "fw-only" }),
+    ]);
+  } finally {
+    readSpy.mockRestore();
+  }
+});
+
+it("rejects executable frontmatter in readSkillIdentity without running code", async () => {
+  const sentinelKey = "__skillHarnessIdentityExecSentinel__";
+  const globals = globalThis as Record<string, unknown>;
+  delete globals[sentinelKey];
+  const location = path.join(root, "evil", "SKILL.md");
+  await fs.mkdir(path.dirname(location), { recursive: true });
+  await fs.writeFile(
+    location,
+    `---js\n(() => { globalThis.${sentinelKey} = true; return { name: "evil" }; })()\n---\nBody\n`,
+  );
+  try {
+    expect(await readSkillIdentity({ name: "evil", location })).toBeUndefined();
+    expect(globals[sentinelKey]).toBeUndefined();
+  } finally {
+    delete globals[sentinelKey];
+  }
+});
+
+it("keeps a single graph snapshot across scoped resolver calls even after disk replacement", async () => {
+  const alpha = await skill("alpha");
+  const beta = await skill("beta");
+  const gamma = await skill("gamma");
+  const all = [alpha, beta, gamma];
+  const alphaId = (await readSkillIdentity(alpha))!;
+  const betaId = (await readSkillIdentity(beta))!;
+  const gammaId = (await readSkillIdentity(gamma))!;
+
+  await appendImportedRelations(root, [
+    { from: alphaId, to: betaId, type: "composes_with", reason: "rev-1" },
+  ]);
+
+  const resolver = await createRelationGraphResolver(root, all);
+  const first = await resolver.resolve(["alpha"]);
+  expect(first.get("alpha")).toEqual([
+    expect.objectContaining({ name: "beta", reason: "rev-1" }),
+  ]);
+
+  // Replace graph.jsonl with a new revision removing alpha->beta and adding gamma->beta.
+  await fs.rm(relationGraphPath(root), { force: true });
+  await appendImportedRelations(root, [
+    { from: gammaId, to: betaId, type: "depends_on", reason: "rev-2" },
+  ]);
+
+  const readSpy = vi.spyOn(fs, "readFile");
+  try {
+    const second = await resolver.resolve(["beta"]);
+    expect(second.get("beta")).toEqual([
+      expect.objectContaining({
+        name: "alpha",
+        reason: "rev-1",
+        direction: "related-to-current",
+      }),
+    ]);
+    // Both alpha and beta identities were already verified in pass 1.
+    expect(readSpy).not.toHaveBeenCalled();
+  } finally {
+    readSpy.mockRestore();
+  }
+
+  // A fresh resolver observes the replacement revision cleanly.
+  const fresh = await resolveRelationGraph(root, all, { focusNames: ["beta"] });
+  expect(fresh.get("beta")).toEqual([
+    expect.objectContaining({
+      name: "gamma",
+      reason: "rev-2",
+      direction: "related-to-current",
     }),
   ]);
 });

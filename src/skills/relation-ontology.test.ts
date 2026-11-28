@@ -719,4 +719,15 @@ describe("ontology relation import", () => {
       foreign,
     );
   });
+
+  it("rejects executable YAML tags in schema.yaml", async () => {
+    const input = await fixture();
+    await fs.writeFile(
+      input.schemaFile,
+      `${schema}\nextra: !!js/function 'function () { return 1; }'\n`,
+    );
+    await expect(preflightOntologyImport(input)).rejects.toThrow(
+      "Invalid ontology import: schema-profile",
+    );
+  });
 });

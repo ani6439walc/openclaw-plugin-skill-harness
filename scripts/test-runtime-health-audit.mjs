@@ -8,6 +8,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
+import { createStore } from "@wei840222/qmd";
+import { writeSkillSnapshot } from "../dist/src/qmd/skill-index.js";
 import { buildReport, isoTimestamp, sha256 } from "./runtime-health-audit.mjs";
 
 const SCRIPT = fileURLToPath(
@@ -807,6 +809,256 @@ test("multiple skill indexes aggregate failures without exposing names", () => {
   assert.equal(r.activeLeaseCount, 1);
   assert.equal(r.documentVectorMismatchCount, 1);
   assert.equal(JSON.stringify(r).includes("secret"), false);
+});
+test("hash-indexed skill QMD enforces chunk completeness, stored identity, and per-collection partitions", () => {
+  const indexDir = path.join(root, "qmd/skills/indexes/chunk-aware");
+  write("qmd/skills/indexes/chunk-aware/docs/meta/alpha/meta.md", "# alpha\n");
+  write("qmd/skills/indexes/chunk-aware/docs/body/alpha/SKILL.md", "body\n");
+  write(
+    "qmd/skills/indexes/chunk-aware/docs/references/alpha/guide.md",
+    "guide\n",
+  );
+  write(
+    "qmd/skills/indexes/chunk-aware/docs/references/alpha/schema.json",
+    "{}\n",
+  );
+  // Files excluded by QMD eligibility rules must not cause snapshot mismatches.
+  write(
+    "qmd/skills/indexes/chunk-aware/docs/references/alpha/empty.txt",
+    "   \n\t\n",
+  );
+  write(
+    "qmd/skills/indexes/chunk-aware/docs/references/alpha/vendor/example.txt",
+    "vendored\n",
+  );
+  write(
+    "qmd/skills/indexes/chunk-aware/docs/references/alpha/sub/vendor",
+    "v\n",
+  );
+  write("qmd/skills/indexes/chunk-aware/docs/references/alpha/build", "b\n");
+  write(
+    "qmd/skills/indexes/chunk-aware/docs/references/alpha/alpha.identity.json",
+    "{}\n",
+  );
+  write(
+    "qmd/skills/indexes/chunk-aware/docs/references/alpha/alpha.identity.yml",
+    "name: alpha\n",
+  );
+  write("qmd/skills/indexes/chunk-aware/docs/references/alpha/.DS_Store", "x");
+  write("qmd/skills/indexes/chunk-aware/docs/meta/alpha/stray.md", "ignored\n");
+
+  const dbPath = path.join(indexDir, "skill-search.sqlite");
+  const db = new DatabaseSync(dbPath);
+  db.exec(`CREATE TABLE embedding_index_state (singleton INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, generation INTEGER NOT NULL, lease_expires_at INTEGER, updated_at INTEGER NOT NULL);
+CREATE TABLE documents (id INTEGER PRIMARY KEY, collection TEXT NOT NULL, hash TEXT NOT NULL, active INTEGER NOT NULL);
+CREATE TABLE content_vectors (hash TEXT NOT NULL, seq INTEGER NOT NULL, model TEXT NOT NULL, embed_fingerprint TEXT NOT NULL, total_chunks INTEGER NOT NULL, PRIMARY KEY (hash, seq));
+CREATE TABLE vector_collection_ids (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+CREATE TABLE vector_rows (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, seq INTEGER NOT NULL, collection_id INTEGER NOT NULL, UNIQUE(hash, seq, collection_id));
+CREATE TABLE vectors_by_collection (rowid INTEGER PRIMARY KEY);
+INSERT INTO embedding_index_state VALUES (1, 'fp-1', 'embed-v1', 'ready', 1, NULL, 1234567890);
+INSERT INTO vector_collection_ids VALUES (1, 'skill-meta'), (2, 'skill-body'), (3, 'skill-references');
+INSERT INTO documents VALUES (1, 'skill-meta', 'h-shared', 1);
+INSERT INTO documents VALUES (2, 'skill-body', 'h-shared', 1);
+INSERT INTO documents VALUES (3, 'skill-references', 'h-multi', 1);
+INSERT INTO documents VALUES (4, 'skill-references', 'h-ref', 1);
+INSERT INTO documents VALUES (5, 'skill-references', 'h-inactive', 0);
+INSERT INTO content_vectors VALUES ('h-shared', 0, 'embed-v1', 'fp-1', 1);
+INSERT INTO content_vectors VALUES ('h-multi', 0, 'embed-v1', 'fp-1', 3);
+INSERT INTO content_vectors VALUES ('h-multi', 1, 'embed-v1', 'fp-1', 3);
+INSERT INTO content_vectors VALUES ('h-multi', 2, 'embed-v1', 'fp-1', 3);
+INSERT INTO content_vectors VALUES ('h-ref', 0, 'embed-v1', 'fp-1', 1);
+INSERT INTO vector_rows (hash, seq, collection_id) VALUES
+  ('h-shared', 0, 1),
+  ('h-shared', 0, 2),
+  ('h-multi', 0, 3),
+  ('h-multi', 1, 3),
+  ('h-multi', 2, 3),
+  ('h-ref', 0, 3);`);
+  db.close();
+
+  const healthy = report().runtime.qmd.skills;
+  assert.equal(healthy.indexCount, 1);
+  assert.equal(healthy.documentVectorMismatchCount, 0);
+  assert.equal(healthy.snapshotMismatchCount, 0);
+
+  // Missing one collection's partition row for a shared hash must fail even
+  // though the other collection still has a vector row for that hash.
+  const missingColPartDb = new DatabaseSync(dbPath);
+  missingColPartDb.exec(
+    "DELETE FROM vector_rows WHERE hash = 'h-shared' AND collection_id = 1;",
+  );
+  missingColPartDb.close();
+  assert.equal(report().runtime.qmd.skills.documentVectorMismatchCount, 1);
+
+  // Restoring skill-meta but adding an unreferenced skill-references partition
+  // row for h-shared must also fail reverse collection-partition verification.
+  const extraColPartDb = new DatabaseSync(dbPath);
+  extraColPartDb.exec(
+    "INSERT INTO vector_rows (hash, seq, collection_id) VALUES ('h-shared', 0, 1), ('h-shared', 0, 3);",
+  );
+  extraColPartDb.close();
+  assert.equal(report().runtime.qmd.skills.documentVectorMismatchCount, 1);
+
+  // Missing middle chunk (seq=0 and seq=2 present with total_chunks=3) must fail.
+  const partialDb = new DatabaseSync(dbPath);
+  partialDb.exec(
+    "DELETE FROM vector_rows WHERE hash = 'h-shared' AND collection_id = 3; DELETE FROM content_vectors WHERE hash = 'h-multi' AND seq = 1; DELETE FROM vector_rows WHERE hash = 'h-multi' AND seq = 1;",
+  );
+  partialDb.close();
+  assert.equal(report().runtime.qmd.skills.documentVectorMismatchCount, 1);
+
+  // Restoring middle chunk with wrong embed_fingerprint must fail stored-identity check.
+  const wrongFpDb = new DatabaseSync(dbPath);
+  wrongFpDb.exec(
+    "INSERT INTO content_vectors VALUES ('h-multi', 1, 'embed-v1', 'fp-stale', 3); INSERT INTO vector_rows (hash, seq, collection_id) VALUES ('h-multi', 1, 3);",
+  );
+  wrongFpDb.close();
+  assert.equal(report().runtime.qmd.skills.documentVectorMismatchCount, 1);
+
+  // Fixing fingerprint and adding an orphan hash must fail.
+  const orphanDb = new DatabaseSync(dbPath);
+  orphanDb.exec(
+    "UPDATE content_vectors SET embed_fingerprint = 'fp-1' WHERE hash = 'h-multi' AND seq = 1; INSERT INTO content_vectors VALUES ('h-orphan', 0, 'embed-v1', 'fp-1', 1); INSERT INTO vector_rows (hash, seq, collection_id) VALUES ('h-orphan', 0, 3);",
+  );
+  orphanDb.close();
+  assert.equal(report().runtime.qmd.skills.documentVectorMismatchCount, 1);
+
+  // Restoring clean vectors and dropping a reference file must report a snapshot mismatch only.
+  const cleanDb = new DatabaseSync(dbPath);
+  cleanDb.exec(
+    "DELETE FROM content_vectors WHERE hash = 'h-orphan'; DELETE FROM vector_rows WHERE hash = 'h-orphan';",
+  );
+  cleanDb.close();
+  remove("qmd/skills/indexes/chunk-aware/docs/references/alpha/schema.json");
+  const snapshotDrift = report().runtime.qmd.skills;
+  assert.equal(snapshotDrift.documentVectorMismatchCount, 0);
+  assert.equal(snapshotDrift.snapshotMismatchCount, 1);
+});
+test("leftover vector_rows fail even when embedding_index_state, documents, and content_vectors are empty", () => {
+  const indexDir = path.join(root, "qmd/skills/indexes/orphan-partition");
+  fs.mkdirSync(path.join(indexDir, "docs/meta"), { recursive: true });
+  const dbPath = path.join(indexDir, "skill-search.sqlite");
+  const db = new DatabaseSync(dbPath);
+  db.exec(`CREATE TABLE embedding_index_state (singleton INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, generation INTEGER NOT NULL, lease_expires_at INTEGER, updated_at INTEGER NOT NULL);
+CREATE TABLE documents (id INTEGER PRIMARY KEY, collection TEXT NOT NULL, hash TEXT NOT NULL, active INTEGER NOT NULL);
+CREATE TABLE content_vectors (hash TEXT NOT NULL, seq INTEGER NOT NULL, model TEXT NOT NULL, embed_fingerprint TEXT NOT NULL, total_chunks INTEGER NOT NULL, PRIMARY KEY (hash, seq));
+CREATE TABLE vector_collection_ids (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+CREATE TABLE vector_rows (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, seq INTEGER NOT NULL, collection_id INTEGER NOT NULL, UNIQUE(hash, seq, collection_id));
+CREATE TABLE vectors_by_collection (rowid INTEGER PRIMARY KEY);
+INSERT INTO vector_collection_ids VALUES (1, 'skill-body');
+INSERT INTO vector_rows (hash, seq, collection_id) VALUES ('h-leftover', 0, 1);`);
+  db.close();
+
+  assert.equal(report().runtime.qmd.skills.documentVectorMismatchCount, 1);
+});
+test("legacy vectors_vec layout takes precedence over empty staging vector_rows", () => {
+  const indexDir = path.join(root, "qmd/skills/indexes/legacy-layout");
+  write(
+    "qmd/skills/indexes/legacy-layout/docs/meta/alpha/meta.md",
+    "# alpha\n",
+  );
+  write("qmd/skills/indexes/legacy-layout/docs/body/alpha/SKILL.md", "body\n");
+  const dbPath = path.join(indexDir, "skill-search.sqlite");
+  const db = new DatabaseSync(dbPath);
+  db.exec(`CREATE TABLE embedding_index_state (singleton INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, generation INTEGER NOT NULL, lease_expires_at INTEGER, updated_at INTEGER NOT NULL);
+CREATE TABLE documents (id INTEGER PRIMARY KEY, collection TEXT NOT NULL, hash TEXT NOT NULL, active INTEGER NOT NULL);
+CREATE TABLE content_vectors (hash TEXT NOT NULL, seq INTEGER NOT NULL, model TEXT NOT NULL, embed_fingerprint TEXT NOT NULL, total_chunks INTEGER NOT NULL, PRIMARY KEY (hash, seq));
+CREATE TABLE vector_collection_ids (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+CREATE TABLE vector_rows (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, seq INTEGER NOT NULL, collection_id INTEGER NOT NULL, UNIQUE(hash, seq, collection_id));
+CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY);
+CREATE TABLE vectors_by_collection (rowid INTEGER PRIMARY KEY);
+INSERT INTO embedding_index_state VALUES (1, 'fp-1', 'embed-v1', 'ready', 1, NULL, 1234567890);
+INSERT INTO documents VALUES (1, 'skill-meta', 'h-meta', 1);
+INSERT INTO documents VALUES (2, 'skill-body', 'h-body', 1);
+INSERT INTO content_vectors VALUES ('h-meta', 0, 'embed-v1', 'fp-1', 1);
+INSERT INTO content_vectors VALUES ('h-body', 0, 'embed-v1', 'fp-1', 1);
+INSERT INTO vectors_vec VALUES ('h-meta_0'), ('h-body_0');`);
+  db.close();
+
+  const legacy = report().runtime.qmd.skills;
+  assert.equal(legacy.documentVectorMismatchCount, 0);
+  assert.equal(legacy.snapshotMismatchCount, 0);
+
+  // Once vectors_vec is dropped, the partitioned layout becomes authoritative
+  // and the empty vector_rows table must be reported as a mismatch.
+  const flippedDb = new DatabaseSync(dbPath);
+  flippedDb.exec("DROP TABLE vectors_vec;");
+  flippedDb.close();
+  assert.equal(report().runtime.qmd.skills.documentVectorMismatchCount, 1);
+});
+test("hash-only schemas without chunk metadata fall back to hash-presence coverage", () => {
+  const indexDir = path.join(root, "qmd/skills/indexes/hash-only");
+  write("qmd/skills/indexes/hash-only/docs/meta/alpha/meta.md", "# alpha\n");
+  write("qmd/skills/indexes/hash-only/docs/body/alpha/SKILL.md", "body\n");
+  const dbPath = path.join(indexDir, "skill-search.sqlite");
+  const db = new DatabaseSync(dbPath);
+  db.exec(`CREATE TABLE embedding_index_state (singleton INTEGER PRIMARY KEY, status TEXT NOT NULL, generation INTEGER NOT NULL, lease_expires_at INTEGER, updated_at INTEGER NOT NULL);
+CREATE TABLE documents (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, active INTEGER NOT NULL);
+CREATE TABLE content_vectors (hash TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (hash, seq));
+INSERT INTO embedding_index_state VALUES (1, 'ready', 1, NULL, 1234567890);
+INSERT INTO documents VALUES (1, 'h-a', 1);
+INSERT INTO documents VALUES (2, 'h-b', 1);
+INSERT INTO content_vectors VALUES ('h-a', 0);
+INSERT INTO content_vectors VALUES ('h-b', 0);
+INSERT INTO content_vectors VALUES ('h-b', 1);`);
+  db.close();
+
+  const healthy = report().runtime.qmd.skills;
+  assert.equal(healthy.documentVectorMismatchCount, 0);
+  assert.equal(healthy.snapshotMismatchCount, 0);
+
+  const missingDb = new DatabaseSync(dbPath);
+  missingDb.exec("DELETE FROM content_vectors WHERE hash = 'h-a'");
+  missingDb.close();
+  assert.equal(report().runtime.qmd.skills.documentVectorMismatchCount, 1);
+});
+test("snapshot count matches a real QMD update with blank and excluded reference files", async () => {
+  const skillDir = path.join(root, "fixture-skills/demo");
+  write(
+    "fixture-skills/demo/SKILL.md",
+    "---\nname: demo\ndescription: Demo skill\n---\n\nDemo instructions.\n",
+  );
+  write("fixture-skills/demo/references/empty.txt", "   \n\t\n");
+  write("fixture-skills/demo/references/vendor/example.txt", "vendored text\n");
+  write("fixture-skills/demo/references/sub/vendor", "literal vendor file\n");
+  write("fixture-skills/demo/references/build", "literal build file\n");
+  write("fixture-skills/demo/references/vendor.txt", "kept vendor.txt file\n");
+  write(
+    "fixture-skills/demo/references/node_modules/pkg/readme.md",
+    "ignored dep\n",
+  );
+  write("fixture-skills/demo/references/demo.identity.json", "{}\n");
+  write("fixture-skills/demo/references/.hidden.md", "hidden\n");
+  write("fixture-skills/demo/references/guide.json", '{"ok":true}\n');
+
+  const indexDir = path.join(root, "qmd/skills/indexes/real-qmd");
+  const docsRoot = path.join(indexDir, "docs");
+  const dbPath = path.join(indexDir, "skill-search.sqlite");
+  const collections = await writeSkillSnapshot({
+    docsRoot,
+    skills: [
+      {
+        name: "demo",
+        description: "Demo skill",
+        location: path.join(skillDir, "SKILL.md"),
+        source: "workspace",
+      },
+    ],
+  });
+  const store = await createStore({
+    dbPath,
+    config: { collections },
+  });
+  try {
+    await store.update();
+  } finally {
+    await store.close();
+  }
+
+  const skillsQmd = report().runtime.qmd.skills;
+  assert.equal(skillsQmd.indexCount, 1);
+  assert.equal(skillsQmd.unavailableCount, 0);
+  assert.equal(skillsQmd.snapshotMismatchCount, 0);
 });
 test("cohort boundary and retention coverage are explicit", () => {
   update(

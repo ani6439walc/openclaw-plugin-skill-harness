@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { DatabaseSync } from "node:sqlite";
@@ -230,16 +231,320 @@ function countFiles(root) {
   const files = walk(root).filter(isFile);
   return [files.length, sum(files.map((target) => fs.statSync(target).size))];
 }
+const QMD_EXCLUDE_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".cache",
+  "vendor",
+  "dist",
+  "build",
+]);
+const QMD_MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+function isNonBlankQmdFile(target, size) {
+  if (size <= 0 || size > QMD_MAX_FILE_SIZE) return false;
+  let fd;
+  try {
+    fd = fs.openSync(target, "r");
+    const buffer = Buffer.alloc(Math.min(size, 4096));
+    const decoder = new StringDecoder("utf8");
+    let offset = 0;
+    while (offset < size) {
+      const read = fs.readSync(
+        fd,
+        buffer,
+        0,
+        Math.min(buffer.length, size - offset),
+        offset,
+      );
+      if (read <= 0) break;
+      if (decoder.write(buffer.subarray(0, read)).trim().length > 0)
+        return true;
+      offset += read;
+    }
+    return decoder.end().trim().length > 0;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+function countEligibleCollectionFiles(collectionRoot, matchesName) {
+  let rootReal;
+  try {
+    rootReal = fs.realpathSync(collectionRoot);
+    if (!fs.statSync(rootReal).isDirectory()) return 0;
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  function visit(directory) {
+    let entries;
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (
+        entry.name.startsWith(".") ||
+        entry.isSymbolicLink() ||
+        QMD_EXCLUDE_DIRS.has(entry.name)
+      )
+        continue;
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(target);
+      } else if (entry.isFile()) {
+        if (!matchesName(entry.name)) continue;
+        const info = stat(target);
+        if (!info?.isFile()) continue;
+        if (isNonBlankQmdFile(target, info.size)) count++;
+      }
+    }
+  }
+  visit(rootReal);
+  return count;
+}
+
+function countSkillSnapshotFiles(snapshotRoot) {
+  const metaRoot = path.join(snapshotRoot, "meta");
+  const bodyRoot = path.join(snapshotRoot, "body");
+  const refsRoot = path.join(snapshotRoot, "references");
+  if (
+    !isDirectory(metaRoot) &&
+    !isDirectory(bodyRoot) &&
+    !isDirectory(refsRoot)
+  ) {
+    return walk(snapshotRoot).filter(
+      (target) => isFile(target) && target.endsWith(".md"),
+    ).length;
+  }
+  return (
+    countEligibleCollectionFiles(metaRoot, (name) => name === "meta.md") +
+    countEligibleCollectionFiles(bodyRoot, (name) => name === "SKILL.md") +
+    countEligibleCollectionFiles(
+      refsRoot,
+      (name) =>
+        !name.endsWith(".identity.json") && !name.endsWith(".identity.yml"),
+    )
+  );
+}
+
+function tableColumns(db, tableName) {
+  try {
+    return new Set(
+      db
+        .prepare(`PRAGMA table_info(${tableName})`)
+        .all()
+        .map((row) => row.name),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function qmdVecLayoutKind(db) {
+  const rows = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('vectors_vec', 'vectors_by_collection')",
+    )
+    .all();
+  if (rows.some((row) => row.name === "vectors_vec")) return "legacy";
+  if (rows.some((row) => row.name === "vectors_by_collection"))
+    return "partitioned";
+  return "none";
+}
+
+function evaluateQmdVectorCoverage(db, indexedDocuments, indexedVectors) {
+  const docCols = tableColumns(db, "documents");
+  const vecCols = tableColumns(db, "content_vectors");
+  const stateCols = tableColumns(db, "embedding_index_state");
+  const vecRowCols = tableColumns(db, "vector_rows");
+  const colIdCols = tableColumns(db, "vector_collection_ids");
+  if (!docCols.has("active") || vecCols.size === 0) return null;
+
+  // Minimal synthetic fixtures without hash columns fall back to row counts.
+  if (!docCols.has("hash") || !vecCols.has("hash")) {
+    return indexedDocuments !== null && indexedVectors !== null
+      ? indexedDocuments === indexedVectors
+      : null;
+  }
+
+  // Schemas with hash columns but without chunk metadata check hash presence.
+  if (!vecCols.has("total_chunks")) {
+    const coverage = db
+      .prepare(
+        `SELECT
+          (SELECT COUNT(*) FROM documents d
+            WHERE d.active = 1
+              AND NOT EXISTS (SELECT 1 FROM content_vectors v WHERE v.hash = d.hash)) AS missing,
+          (SELECT COUNT(*) FROM content_vectors v
+            WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.active = 1 AND d.hash = v.hash)) AS orphan`,
+      )
+      .get();
+    return coverage.missing === 0 && coverage.orphan === 0;
+  }
+
+  // Full QMD schema: verify chunk completeness, stored embedding identity,
+  // orphan cleanup, and active-layout partition parity.
+  const layoutKind = qmdVecLayoutKind(db);
+  const hasSeq = vecCols.has("seq");
+  const hasIdentity =
+    vecCols.has("model") &&
+    vecCols.has("embed_fingerprint") &&
+    stateCols.has("model") &&
+    stateCols.has("fingerprint");
+  const countPartitionRows = () =>
+    vecRowCols.size > 0
+      ? db.prepare("SELECT COUNT(*) AS count FROM vector_rows").get().count
+      : 0;
+
+  let identityFilter = "";
+  let identityParams = [];
+  let identityGroupCols = "hash";
+  if (hasIdentity) {
+    const stored = db
+      .prepare(
+        "SELECT model, fingerprint FROM embedding_index_state WHERE singleton = 1",
+      )
+      .get();
+    if (
+      !stored ||
+      typeof stored.model !== "string" ||
+      typeof stored.fingerprint !== "string"
+    ) {
+      const leftoverPartitionRows =
+        layoutKind === "legacy" ? 0 : countPartitionRows();
+      return (
+        indexedDocuments === 0 &&
+        indexedVectors === 0 &&
+        leftoverPartitionRows === 0
+      );
+    }
+    const wrongIdentity = db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM content_vectors WHERE model != ? OR embed_fingerprint != ?",
+      )
+      .get(stored.model, stored.fingerprint).count;
+    if (wrongIdentity > 0) return false;
+    identityFilter = "WHERE model = ? AND embed_fingerprint = ?";
+    identityParams = [stored.model, stored.fingerprint];
+    identityGroupCols = "hash, model, embed_fingerprint";
+  }
+
+  const completeSeqClause = hasSeq
+    ? "AND MIN(seq) = 0 AND MAX(seq) = MAX(total_chunks) - 1 AND COUNT(DISTINCT seq) = MAX(total_chunks)"
+    : "";
+  const incompleteSeqClause = hasSeq
+    ? "OR MIN(seq) <> 0 OR MAX(seq) <> MAX(total_chunks) - 1 OR COUNT(DISTINCT seq) <> MAX(total_chunks)"
+    : "";
+
+  const pending = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+      FROM documents d
+      LEFT JOIN (
+        SELECT hash
+        FROM content_vectors
+        ${identityFilter}
+        GROUP BY hash
+        HAVING MAX(total_chunks) >= 1
+          AND MIN(total_chunks) = MAX(total_chunks)
+          AND COUNT(*) = MAX(total_chunks)
+          ${completeSeqClause}
+      ) complete ON complete.hash = d.hash
+      WHERE d.active = 1 AND complete.hash IS NULL`,
+    )
+    .get(...identityParams).count;
+  if (pending > 0) return false;
+
+  const incomplete = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM (
+        SELECT hash
+        FROM content_vectors
+        GROUP BY ${identityGroupCols}
+        HAVING MAX(total_chunks) < 1
+          OR MIN(total_chunks) <> MAX(total_chunks)
+          OR COUNT(*) <> MAX(total_chunks)
+          ${incompleteSeqClause}
+      )`,
+    )
+    .get().count;
+  if (incomplete > 0) return false;
+
+  const orphan = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+      FROM content_vectors v
+      WHERE NOT EXISTS (
+        SELECT 1 FROM documents d WHERE d.active = 1 AND d.hash = v.hash
+      )`,
+    )
+    .get().count;
+  if (orphan > 0) return false;
+
+  // Match QMD vecLayout precedence: legacy vectors_vec wins while present, so
+  // empty staging rows in vector_rows must not be treated as missing vectors.
+  if (layoutKind === "partitioned") {
+    if (
+      !hasSeq ||
+      !docCols.has("collection") ||
+      !vecRowCols.has("hash") ||
+      !vecRowCols.has("seq") ||
+      !vecRowCols.has("collection_id") ||
+      !colIdCols.has("id") ||
+      !colIdCols.has("name")
+    ) {
+      return false;
+    }
+    const missingPartition = db
+      .prepare(
+        `SELECT COUNT(*) AS count
+        FROM content_vectors cv
+        JOIN (SELECT DISTINCT hash, collection FROM documents WHERE active = 1) d
+          ON d.hash = cv.hash
+        LEFT JOIN vector_collection_ids ci ON ci.name = d.collection
+        LEFT JOIN vector_rows vr
+          ON vr.hash = cv.hash AND vr.seq = cv.seq AND vr.collection_id = ci.id
+        WHERE vr.hash IS NULL`,
+      )
+      .get().count;
+    if (missingPartition > 0) return false;
+    const extraPartition = db
+      .prepare(
+        `SELECT COUNT(*) AS count
+        FROM vector_rows vr
+        LEFT JOIN vector_collection_ids ci ON ci.id = vr.collection_id
+        WHERE NOT EXISTS (
+          SELECT 1 FROM content_vectors cv
+          WHERE cv.hash = vr.hash AND cv.seq = vr.seq
+        )
+        OR ci.name IS NULL
+        OR NOT EXISTS (
+          SELECT 1 FROM documents d
+          WHERE d.active = 1 AND d.hash = vr.hash AND d.collection = ci.name
+        )`,
+      )
+      .get().count;
+    if (extraPartition > 0) return false;
+  } else if (layoutKind === "none" && vecRowCols.size > 0) {
+    if (countPartitionRows() > 0 || (indexedVectors ?? 0) > 0) return false;
+  }
+
+  return true;
+}
+
 function qmdDatabaseHealth(snapshotRoot, databasePath) {
-  const snapshotMarkdownFiles = walk(snapshotRoot).filter((target) =>
-    target.endsWith(".md"),
-  ).length;
+  const snapshotIndexedFiles = countSkillSnapshotFiles(snapshotRoot);
   const unavailable = {
     databaseStatus: "unavailable",
     integrityCheck: null,
     generation: null,
     leaseActive: null,
-    snapshotMarkdownFiles,
+    snapshotIndexedFiles,
     indexedDocuments: null,
     indexedVectors: null,
     documentsMatchVectors: null,
@@ -247,7 +552,11 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
   };
   if (!isFile(databasePath)) return unavailable;
   let db;
-  let integrityCheck, state, indexedDocuments, indexedVectors;
+  let integrityCheck,
+    state,
+    indexedDocuments,
+    indexedVectors,
+    documentsMatchVectors;
   try {
     db = new DatabaseSync(databasePath, { readOnly: true });
     integrityCheck = Object.values(
@@ -269,6 +578,11 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
     const vectors = optional("SELECT COUNT(*) AS count FROM content_vectors");
     indexedDocuments = docs?.count ?? null;
     indexedVectors = vectors?.count ?? null;
+    documentsMatchVectors = evaluateQmdVectorCoverage(
+      db,
+      indexedDocuments,
+      indexedVectors,
+    );
   } catch {
     return unavailable;
   } finally {
@@ -281,16 +595,13 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
     leaseActive:
       typeof state?.lease_expires_at === "number" &&
       state.lease_expires_at > Date.now(),
-    snapshotMarkdownFiles,
+    snapshotIndexedFiles,
     indexedDocuments,
     indexedVectors,
-    documentsMatchVectors:
-      indexedDocuments !== null && indexedVectors !== null
-        ? indexedDocuments === indexedVectors
-        : null,
+    documentsMatchVectors,
     snapshotMatchesIndexedDocuments:
       indexedDocuments !== null
-        ? snapshotMarkdownFiles === indexedDocuments
+        ? snapshotIndexedFiles === indexedDocuments
         : null,
   };
 }

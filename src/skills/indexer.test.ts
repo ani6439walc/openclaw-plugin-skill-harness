@@ -607,4 +607,33 @@ describe("skill indexer", () => {
       otherSkills.find((skill) => skill.name === "cross-agent-skill"),
     ).toMatchObject({ source: "shared" });
   });
+
+  it("rejects executable frontmatter without executing code during indexing", async () => {
+    const sentinelKey = "__skillHarnessIndexerExecSentinel__";
+    const globals = globalThis as Record<string, unknown>;
+    delete globals[sentinelKey];
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-index-exec-"));
+    const workspaceDir = path.join(tmp, "workspace");
+    const stateDir = path.join(tmp, "state");
+    const evilDir = path.join(workspaceDir, "skills", "evil");
+    fs.mkdirSync(evilDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(evilDir, "SKILL.md"),
+      `---js\n(() => { globalThis.${sentinelKey} = true; return { name: "evil" }; })()\n---\nBody\n`,
+    );
+    try {
+      const skills = await listAvailableSkills({
+        api: createApi(stateDir, workspaceDir),
+        agentId: "main",
+        bundledSkillsDir: "",
+        cacheTtlMs: 0,
+        homeDir: path.join(tmp, "home"),
+      });
+      expect(skills.find((skill) => skill.name === "evil")).toBeUndefined();
+      expect(globals[sentinelKey]).toBeUndefined();
+    } finally {
+      delete globals[sentinelKey];
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });

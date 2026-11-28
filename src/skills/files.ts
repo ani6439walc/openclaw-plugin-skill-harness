@@ -93,6 +93,7 @@ export async function readAvailableSkill(
       await relatedSkillsBySkillName(
         await listAvailableSkills(params),
         params.api,
+        [skill.name],
       )
     ).get(skill.name.toLowerCase()) ?? [];
   if (!params.filePath) {

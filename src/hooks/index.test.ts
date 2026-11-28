@@ -1,6 +1,7 @@
 import {
   appendImportedRelations,
   readSkillIdentity,
+  relationGraphPath,
 } from "../skills/relation-graph.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
@@ -3911,6 +3912,149 @@ describe("createHookHandlers topic switch flow", () => {
       }
     },
   );
+
+  it("resolves candidate expansion and relation evidence from one consistent graph snapshot", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-graph-snapshot-"));
+    const workspace = path.join(tmp, "workspace");
+    const root = path.join(workspace, "skills");
+    const dataRoot = path.join(tmp, "data");
+    writeSkill(root, "alpha-workflow", "Alpha workflow");
+    writeSkill(root, "beta-workflow", "Beta workflow");
+    writeSkill(root, "gamma-workflow", "Gamma workflow");
+    const alphaId = (await readSkillIdentity({
+      name: "alpha-workflow",
+      location: path.join(root, "alpha-workflow/SKILL.md"),
+    }))!;
+    const betaId = (await readSkillIdentity({
+      name: "beta-workflow",
+      location: path.join(root, "beta-workflow/SKILL.md"),
+    }))!;
+    const gammaId = (await readSkillIdentity({
+      name: "gamma-workflow",
+      location: path.join(root, "gamma-workflow/SKILL.md"),
+    }))!;
+
+    const rev2Root = path.join(tmp, "rev2");
+    await appendImportedRelations(rev2Root, [
+      {
+        from: gammaId,
+        to: betaId,
+        type: "depends_on",
+        reason: "Revision two gamma-to-beta edge",
+      },
+    ]);
+    const rev2GraphRaw = fs.readFileSync(relationGraphPath(rev2Root), "utf8");
+
+    await appendImportedRelations(dataRoot, [
+      {
+        from: alphaId,
+        to: betaId,
+        type: "composes_with",
+        reason: "Revision one alpha-to-beta edge",
+      },
+    ]);
+
+    const classifier = vi.fn().mockResolvedValue({
+      skills: ["alpha-workflow", "beta-workflow"],
+      confidence: 0.9,
+      reason: "selected",
+      relationDecisions: [],
+    });
+    const { handlers } = createTopicFlowHarness({
+      historicalIntents: [],
+      dataRoot,
+      classifier,
+      configRaw: { routing: { skills: { maxInjectedSkills: 3 } } },
+      api: {
+        runtime: {
+          state: { resolveStateDir: () => path.join(tmp, "state") },
+          agent: { resolveAgentWorkspaceDir: () => workspace },
+        },
+      } as unknown as Partial<OpenClawPluginApi>,
+    });
+
+    const originalReadFile = fs.promises.readFile.bind(fs.promises);
+    const graphFile = relationGraphPath(dataRoot);
+    let graphReadCount = 0;
+    let swapped = false;
+    const readSpy = vi
+      .spyOn(fs.promises, "readFile")
+      .mockImplementation(async (target, options) => {
+        const content = await originalReadFile(target, options as never);
+        if (String(target) === graphFile) {
+          graphReadCount += 1;
+        }
+        if (
+          !swapped &&
+          graphReadCount > 0 &&
+          String(target).endsWith("/beta-workflow/SKILL.md")
+        ) {
+          swapped = true;
+          fs.writeFileSync(graphFile, rev2GraphRaw, "utf8");
+        }
+        return content;
+      });
+    try {
+      await handlers.onBeforePromptBuild(
+        {
+          prompt: "alpha-workflow",
+          messages: [{ role: "user", content: "alpha-workflow" }],
+        } as never,
+        {
+          agentId: "main",
+          sessionId: "graph-snapshot-session",
+          sessionKey: "agent:main:graph-snapshot",
+          messageProvider: "webchat",
+          trigger: "user",
+          runId: "graph-snapshot-turn-1",
+        },
+      );
+      expect(graphReadCount).toBe(1);
+      expect(swapped).toBe(true);
+      expect(classifier).toHaveBeenCalledTimes(1);
+      const firstParams = classifier.mock.calls[0]![0];
+      expect(
+        firstParams.candidateSkills.map(
+          (skill: { name: string }) => skill.name,
+        ),
+      ).toEqual(["alpha-workflow", "beta-workflow"]);
+      expect(
+        firstParams.relationEvidence.map(
+          (item: { skill: string; from: string; to: string }) =>
+            `${item.skill}:${item.from}->${item.to}`,
+        ),
+      ).toEqual([
+        "alpha-workflow:alpha-workflow->beta-workflow",
+        "beta-workflow:alpha-workflow->beta-workflow",
+      ]);
+
+      await handlers.onBeforePromptBuild(
+        {
+          prompt: "beta-workflow",
+          messages: [{ role: "user", content: "beta-workflow" }],
+        } as never,
+        {
+          agentId: "main",
+          sessionId: "graph-snapshot-session",
+          sessionKey: "agent:main:graph-snapshot",
+          messageProvider: "webchat",
+          trigger: "user",
+          runId: "graph-snapshot-turn-2",
+        },
+      );
+      expect(classifier).toHaveBeenCalledTimes(2);
+      const secondParams = classifier.mock.calls[1]![0];
+      expect(
+        secondParams.relationEvidence.map(
+          (item: { skill: string; from: string; to: string }) =>
+            `${item.skill}:${item.from}->${item.to}`,
+        ),
+      ).toEqual(["beta-workflow:gamma-workflow->beta-workflow"]);
+    } finally {
+      readSpy.mockRestore();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 
   it("routes direct skill name matches into candidate pool and prompt context", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-name-match-"));

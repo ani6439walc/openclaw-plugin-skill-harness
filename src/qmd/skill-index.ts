@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import type { createStore, QMDStore } from "@wei840222/qmd";
-import matter from "gray-matter";
+import { parseInertYamlFrontmatter } from "../skills/frontmatter.js";
 import { logger } from "../../api.js";
 import {
   formatErrorDiagnostic,
@@ -300,7 +300,7 @@ async function listReferenceFiles(skillDir: string): Promise<string[]> {
 
 function stripMarkdownFrontmatter(raw: string): string {
   try {
-    return matter(raw).content.trim();
+    return parseInertYamlFrontmatter(raw).content.trim();
   } catch {
     return raw.trim();
   }
@@ -466,7 +466,7 @@ function parseFrontmatterIdentity(raw: string | undefined): {
 } {
   if (!raw) return {};
   try {
-    const parsed = matter(raw);
+    const parsed = parseInertYamlFrontmatter(raw);
     return {
       skillName:
         typeof parsed.data.skill === "string"

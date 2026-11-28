@@ -138,10 +138,15 @@ export function registerSkillTools(
               sharedRoots: options.getSharedRoots?.(),
               homeDir: options.homeDir,
             });
-            const relatedSkills = showRelated
-              ? await relatedSkillsBySkillName(skills, api)
-              : undefined;
             const page = skills.slice(offset, offset + limit);
+            const relatedSkills =
+              showRelated && page.length > 0
+                ? await relatedSkillsBySkillName(
+                    skills,
+                    api,
+                    page.map((skill) => skill.name),
+                  )
+                : undefined;
             const nextOffset = offset + page.length;
             const hasMore = nextOffset < skills.length;
             const usageStats = showStats
@@ -304,7 +309,11 @@ export function registerSkillTools(
               });
               const relatedSkills =
                 showRelated && matchedHits.length > 0
-                  ? await relatedSkillsBySkillName(inventory, api)
+                  ? await relatedSkillsBySkillName(
+                      inventory,
+                      api,
+                      matchedHits.map(({ skill }) => skill.name),
+                    )
                   : undefined;
               const usageStats =
                 showStats && matchedHits.length > 0
