@@ -1,7 +1,9 @@
+import * as fsSync from "node:fs";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("node:fs", { spy: true });
 import {
   applyImportCheckpoint,
   CLASSIFICATION_VERSION,
@@ -124,8 +126,14 @@ describe("relation import", () => {
         response(input)) as TypeSafeClient["systemOne"]);
     const output = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
+      const planOut = path.join(dataRoot, "plan.json");
       const common = ["--source", dir, "--data-root", dataRoot];
-      await runRelationImportCli(["preflight", ...common]);
+      await runRelationImportCli(["preflight", ...common, "--output", planOut]);
+      const preflightSummary = JSON.parse(
+        output.mock.calls[0]?.[0] as string,
+      ) as { needsModel: number; estimatedRequests: number };
+      expect(preflightSummary.needsModel).toBe(1);
+      expect(preflightSummary.estimatedRequests).toBe(1);
       await runRelationImportCli([
         "sample",
         ...common,
@@ -143,6 +151,10 @@ describe("relation import", () => {
         checkpoint,
       ]);
       expect(request).toHaveBeenCalledTimes(1);
+      if (process.platform !== "win32") {
+        expect((await fs.stat(planOut)).mode & 0o777).toBe(0o600);
+        expect((await fs.stat(checkpoint)).mode & 0o777).toBe(0o600);
+      }
       await runRelationImportCli([
         "apply",
         ...common,
@@ -254,40 +266,145 @@ describe("relation import", () => {
     ]);
     expect(await fs.readFile(path.join(dir, "a/SKILL.md"))).toEqual(before);
   });
-  it("uses threshold and margin without promoting uncertain relations", () => {
-    const scores = {
-      depends_on: 0.8,
-      composes_with: 0.65,
+  it("uses calibrated per-predicate thresholds without promoting uncertain relations", () => {
+    const base = {
+      depends_on: 0.1,
+      composes_with: 0.1,
       similar_to: 0.1,
       conflicts_with: 0.1,
       specializes: 0.1,
     };
-    expect(selectRelationType(scores)).toBe("depends_on");
-    expect(selectRelationType({ ...scores, composes_with: 0.7 })).toBe(
+    expect(
+      selectRelationType({ ...base, depends_on: 0.85, composes_with: 0.7 }),
+    ).toBe("depends_on");
+    expect(
+      selectRelationType({ ...base, depends_on: 0.95, composes_with: 0.8 }),
+    ).toBe("depends_on");
+    expect(
+      selectRelationType({ ...base, depends_on: 0.85, composes_with: 0.71 }),
+    ).toBe("related");
+    expect(selectRelationType({ ...base, depends_on: 0.84 })).toBe("related");
+
+    expect(
+      selectRelationType({ ...base, conflicts_with: 0.85, similar_to: 0.7 }),
+    ).toBe("conflicts_with");
+    expect(
+      selectRelationType({ ...base, conflicts_with: 0.85, similar_to: 0.71 }),
+    ).toBe("related");
+    expect(selectRelationType({ ...base, conflicts_with: 0.84 })).toBe(
       "related",
     );
-    expect(selectRelationType({ ...scores, depends_on: 0.79 })).toBe("related");
+
+    expect(
+      selectRelationType({ ...base, similar_to: 0.85, composes_with: 0.7 }),
+    ).toBe("similar_to");
+    expect(
+      selectRelationType({ ...base, similar_to: 0.85, composes_with: 0.71 }),
+    ).toBe("related");
+    expect(selectRelationType({ ...base, similar_to: 0.84 })).toBe("related");
+
+    expect(
+      selectRelationType({ ...base, composes_with: 0.68, similar_to: 0.53 }),
+    ).toBe("composes_with");
+    expect(
+      selectRelationType({ ...base, composes_with: 0.68, similar_to: 0.54 }),
+    ).toBe("related");
+    expect(selectRelationType({ ...base, composes_with: 0.67 })).toBe(
+      "related",
+    );
+
+    expect(selectRelationType({ ...base, specializes: 0.9 })).toBe(
+      "specializes",
+    );
+    expect(
+      selectRelationType({
+        specializes: 0.85,
+        similar_to: 0.88,
+        composes_with: 0.8,
+        conflicts_with: 0.55,
+        depends_on: 0.55,
+      }),
+    ).toBe("specializes");
+    expect(
+      selectRelationType({
+        ...base,
+        specializes: 0.85,
+        similar_to: 0.88 + 1.5 * Number.EPSILON,
+      }),
+    ).toBe("related");
+    expect(
+      selectRelationType({
+        specializes: 0.84,
+        similar_to: 0.1,
+        composes_with: 0.1,
+        conflicts_with: 0.1,
+        depends_on: 0.1,
+      }),
+    ).toBe("related");
+    expect(
+      selectRelationType({
+        ...base,
+        specializes: 0.85,
+        similar_to: 0.89,
+      }),
+    ).toBe("related");
+    expect(
+      selectRelationType({
+        ...base,
+        specializes: 0.85,
+        composes_with: 0.81,
+      }),
+    ).toBe("related");
+    expect(
+      selectRelationType({
+        ...base,
+        specializes: 0.85,
+        conflicts_with: 0.56,
+      }),
+    ).toBe("related");
+    expect(
+      selectRelationType({
+        ...base,
+        specializes: 0.85,
+        depends_on: 0.56,
+      }),
+    ).toBe("related");
+    expect(
+      selectRelationType({
+        ...base,
+        conflicts_with: 0.88,
+        specializes: 0.86,
+      }),
+    ).toBe("related");
   });
-  it("bounds batches to five and concurrency to two; evaluates fixed questions", async () => {
+  it("classifies one relation per request with concurrency bounded to four and fixed predicate questions", async () => {
     let active = 0,
       max = 0;
     const classifier = client(async (input) => {
       active++;
       max = Math.max(max, active);
-      expect(
-        Object.keys((input as { questions: object }).questions).length,
-      ).toBeLessThanOrEqual(25);
+      const req = input as {
+        state: Record<string, unknown>;
+        questions: Record<string, unknown>;
+      };
+      expect(req.state).toHaveProperty("source");
+      expect(req.state).toHaveProperty("target");
+      expect(req.state).toHaveProperty("reason");
+      expect(req.state).not.toHaveProperty("edges");
+      expect(Object.keys(req.questions).sort()).toEqual(
+        [...scoredRelationTypes].sort(),
+      );
       await new Promise((resolve) => setTimeout(resolve, 5));
       active--;
       return response(input);
     });
     const result = await classifyRelations(plan(23), classifier, { limit: 20 });
     expect(Object.keys(result.results)).toHaveLength(20);
-    expect(max).toBe(2);
-    expect(classifier.client.systemOne).toHaveBeenCalledTimes(4);
+    expect(max).toBe(4);
+    expect(classifier.client.systemOne).toHaveBeenCalledTimes(20);
     expect(result.results["0"].relation.type).toBe("composes_with");
   });
-  it("skips no-reason requests, retries failed batches and invalidates changed model", async () => {
+  it("skips no-reason requests, retries failed entries and invalidates changed model", async () => {
     const input = plan(2);
     input.candidates[0].relation.reason = "";
     const failed = client(() => {
@@ -311,16 +428,201 @@ describe("relation import", () => {
     );
     expect(success.client.systemOne).toHaveBeenCalledTimes(2);
   });
-  it("rejects an incomplete batch rather than partially recording classifications", async () => {
-    const classifier = client(() => ({
-      answers: { edge_0_depends_on: { type: "noul", noul: Infinity } },
-    }));
+  it("isolates an invalid single-edge response without failing neighboring relations", async () => {
+    const classifier = client((input) => {
+      const targetName = (input as { state: { target: { name: string } } })
+        .state.target.name;
+      if (targetName === "b0") {
+        return {
+          answers: { depends_on: { type: "noul", noul: Infinity } },
+        };
+      }
+      return response(input);
+    });
     const result = await classifyRelations(plan(2), classifier);
-    expect(
-      Object.values(result.results).every(
-        (r) => r.status === "failed" && r.relation.type === "related",
-      ),
-    ).toBe(true);
+    expect(result.results["0"].status).toBe("failed");
+    expect(result.results["0"].relation.type).toBe("related");
+    expect(result.results["0"].relation.scores).toBeUndefined();
+    expect(result.results["1"].status).toBe("completed");
+    expect(result.results["1"].relation.type).toBe("composes_with");
+  });
+  it("rejects older classificationVersion checkpoints before reuse or apply", async () => {
+    const input = plan(1);
+    const classifier = client(response);
+    const checkpoint = await classifyRelations(input, classifier);
+    const stale = {
+      ...checkpoint,
+      classificationVersion: "author-relations-v1",
+    };
+    await expect(
+      classifyRelations(input, classifier, { checkpoint: stale }),
+    ).rejects.toThrow("invalid-checkpoint");
+    await expect(
+      applyImportCheckpoint(await root(), input, stale),
+    ).rejects.toThrow("invalid-checkpoint");
+  });
+  it("reports one estimated request per non-empty relation during preflight", async () => {
+    const dir = await root();
+    await skill(dir, "a", '{b: "r1", c: "r2", d: ""}');
+    await skill(dir, "b");
+    await skill(dir, "c");
+    await skill(dir, "d");
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await runRelationImportCli(["preflight", "--source", dir]);
+      const summary = JSON.parse(output.mock.calls[0]?.[0] as string) as {
+        relations: number;
+        needsModel: number;
+        estimatedRequests: number;
+      };
+      expect(summary.relations).toBe(3);
+      expect(summary.needsModel).toBe(2);
+      expect(summary.estimatedRequests).toBe(2);
+    } finally {
+      output.mockRestore();
+    }
+  });
+  it("flushes CLI checkpoints once for 19 or 20 edges and twice for 21 edges", async () => {
+    for (const [count, expectedWrites] of [
+      [19, 1],
+      [20, 1],
+      [21, 2],
+    ] as const) {
+      const dir = await root();
+      const dataRoot = await root();
+      const related = Object.fromEntries(
+        Array.from({ length: count }, (_, i) => [`b${i}`, `reason ${i}`]),
+      );
+      await skill(dir, "a", `'${JSON.stringify(related)}'`);
+      for (let i = 0; i < count; i++) await skill(dir, `b${i}`);
+      const config = path.join(dataRoot, "config.json");
+      const checkpoint = path.join(dataRoot, "checkpoint.json");
+      await fs.writeFile(
+        config,
+        JSON.stringify({
+          plugins: {
+            entries: {
+              "skill-harness": {
+                config: {
+                  decisionModel: { model: "test-jev", apiKey: "fixture-only" },
+                },
+              },
+            },
+          },
+        }),
+      );
+      const request = vi
+        .spyOn(TypeSafeClient.prototype, "systemOne")
+        .mockImplementation((async (input: unknown) =>
+          response(input)) as TypeSafeClient["systemOne"]);
+      const renameSpy = vi.mocked(fsSync.renameSync);
+      renameSpy.mockClear();
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await runRelationImportCli([
+          "classify",
+          "--source",
+          dir,
+          "--config",
+          config,
+          "--checkpoint",
+          checkpoint,
+        ]);
+        const writes = renameSpy.mock.calls.filter(
+          ([, newPath]) => newPath === checkpoint,
+        ).length;
+        expect(writes).toBe(expectedWrites);
+        const saved = JSON.parse(await fs.readFile(checkpoint, "utf8")) as {
+          results: Record<string, unknown>;
+        };
+        expect(Object.keys(saved.results)).toHaveLength(count);
+      } finally {
+        renameSpy.mockClear();
+        request.mockRestore();
+        output.mockRestore();
+      }
+    }
+  });
+  it("stops admitting new edges and drains in-flight requests when a CLI checkpoint flush fails", async () => {
+    const count = 65;
+    const dir = await root();
+    const dataRoot = await root();
+    const related = Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [`b${i}`, `reason ${i}`]),
+    );
+    await skill(dir, "a", `'${JSON.stringify(related)}'`);
+    for (let i = 0; i < count; i++) await skill(dir, `b${i}`);
+    const config = path.join(dataRoot, "config.json");
+    const checkpoint = path.join(dataRoot, "checkpoint.json");
+    await fs.writeFile(
+      config,
+      JSON.stringify({
+        plugins: {
+          entries: {
+            "skill-harness": {
+              config: {
+                decisionModel: { model: "test-jev", apiKey: "fixture-only" },
+              },
+            },
+          },
+        },
+      }),
+    );
+    let started = 0;
+    let active = 0;
+    let settled = 0;
+    const request = vi
+      .spyOn(TypeSafeClient.prototype, "systemOne")
+      .mockImplementation((async (input: unknown) => {
+        started++;
+        active++;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active--;
+        settled++;
+        return response(input);
+      }) as TypeSafeClient["systemOne"]);
+    const actualFs = await vi.importActual<typeof import("node:fs")>("node:fs");
+    const renameSpy = vi
+      .mocked(fsSync.renameSync)
+      .mockImplementation((oldPath, newPath) => {
+        if (newPath === checkpoint) {
+          throw Object.assign(new Error("ENOSPC: no space left on device"), {
+            code: "ENOSPC",
+          });
+        }
+        return actualFs.renameSync(oldPath, newPath);
+      });
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        runRelationImportCli([
+          "classify",
+          "--source",
+          dir,
+          "--config",
+          config,
+          "--checkpoint",
+          checkpoint,
+        ]),
+      ).rejects.toThrow("ENOSPC");
+      const startedAtRejection = started;
+      expect(active).toBe(0);
+      expect(settled).toBe(startedAtRejection);
+      expect(startedAtRejection).toBeGreaterThanOrEqual(20);
+      expect(startedAtRejection).toBeLessThanOrEqual(23);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(started).toBe(startedAtRejection);
+      expect(fsSync.existsSync(checkpoint)).toBe(false);
+      expect(
+        (await fs.readdir(dataRoot)).filter((name) =>
+          name.startsWith("checkpoint.json.tmp-"),
+        ),
+      ).toEqual([]);
+    } finally {
+      renameSpy.mockRestore();
+      request.mockRestore();
+      output.mockRestore();
+    }
   });
   it("applies idempotently and rejects changed content", async () => {
     const dir = await root();
