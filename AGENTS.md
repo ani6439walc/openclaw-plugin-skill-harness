@@ -559,13 +559,14 @@ the existing TypeSafe transport and checkpoint metadata and can
 incur provider charges. The CLI must receive the same provider environment
 variables as the Gateway; reading its config file does not hydrate service-only
 secrets. No credentials are written to checkpoints. Each request
-classifies a single relation independently (five predicate questions per call to avoid cross-edge attention bleed), with at most four concurrent requests. Missing
-author reasons bypass the model and remain `related`; other classifications
+classifies a single relation independently (five predicate questions per call to avoid cross-edge attention bleed), with at most four concurrent requests. Missing author reasons bypass the model and remain `related`; other classifications
 use calibrated per-predicate thresholds (`depends_on`, `conflicts_with`, and
 `similar_to` require `>= 0.85` with a `>= 0.15` lead; `composes_with` requires
-`>= 0.68` with a `>= 0.15` lead; `specializes` requires `>= 0.85`, within `0.03`
-of `similar_to`, at least `0.05` above `composes_with`, and at least `0.30`
-above `depends_on` and `conflicts_with`). Failed model requests remain `related`
+`>= 0.68` with a `>= 0.15` lead; `specializes` requires `>= 0.85`, no more than
+`0.03` below `similar_to`, at least `0.05` above `composes_with`, and at least
+`0.30` above `depends_on` and `conflicts_with`). Existing `author-relations-v1`
+checkpoints are rejected for both `classify` resume and `apply`; reclassify to a
+fresh checkpoint path. Failed model requests remain `related`
 and are reported in the checkpoint without affecting neighboring relations. These
 thresholds select a label, not a verified dependency.
 

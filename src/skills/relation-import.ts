@@ -24,7 +24,6 @@ import type {
 } from "./relation-graph.js";
 
 export const CLASSIFICATION_VERSION = "author-relations-v2";
-const SCORE_EPSILON = 2 * Number.EPSILON;
 const CLASSIFIER_CONCURRENCY = 4;
 const CLI_CHECKPOINT_FLUSH_INTERVAL = 20;
 const bounded = (value: string, size: number) =>
@@ -248,26 +247,26 @@ export function selectRelationType(
   const top = ranked[0];
   const margin = top.score - ranked[1].score;
   if (top.type === "conflicts_with" || top.type === "depends_on") {
-    return top.score >= 0.85 && margin >= 0.15 - SCORE_EPSILON
+    return top.score >= 0.85 && margin >= 0.15 - Number.EPSILON
       ? top.type
       : "related";
   }
   if (
     scores.specializes >= 0.85 &&
-    scores.specializes - scores.similar_to >= -0.03 - SCORE_EPSILON &&
-    scores.specializes - scores.composes_with >= 0.05 - SCORE_EPSILON &&
+    scores.specializes - scores.similar_to >= -0.03 - Number.EPSILON &&
+    scores.specializes - scores.composes_with >= 0.05 - Number.EPSILON &&
     scores.specializes - Math.max(scores.conflicts_with, scores.depends_on) >=
-      0.3 - SCORE_EPSILON
+      0.3 - Number.EPSILON
   ) {
     return "specializes";
   }
   if (top.type === "similar_to") {
-    return top.score >= 0.85 && margin >= 0.15 - SCORE_EPSILON
+    return top.score >= 0.85 && margin >= 0.15 - Number.EPSILON
       ? "similar_to"
       : "related";
   }
   if (top.type === "composes_with") {
-    return top.score >= 0.68 && margin >= 0.15 - SCORE_EPSILON
+    return top.score >= 0.68 && margin >= 0.15 - Number.EPSILON
       ? "composes_with"
       : "related";
   }
@@ -428,8 +427,10 @@ export async function classifyRelations(
     else pending.push(candidate);
   }
   let cursor = 0;
+  let hasCheckpointError = false;
+  let checkpointError: unknown;
   async function worker() {
-    while (cursor < pending.length) {
+    while (!hasCheckpointError && cursor < pending.length) {
       const candidate = pending[cursor++];
       try {
         const response = await classifier.client.systemOne({
@@ -473,12 +474,20 @@ export async function classifyRelations(
           status: "failed",
         };
       }
-      options.onCheckpoint?.(checkpoint);
+      if (!hasCheckpointError) {
+        try {
+          options.onCheckpoint?.(checkpoint);
+        } catch (error) {
+          hasCheckpointError = true;
+          checkpointError = error;
+        }
+      }
     }
   }
   const workerCount = Math.min(CLASSIFIER_CONCURRENCY, pending.length);
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  options.onCheckpoint?.(checkpoint);
+  if (hasCheckpointError) throw checkpointError;
+  if (pending.length === 0) options.onCheckpoint?.(checkpoint);
   return checkpoint;
 }
 
@@ -580,19 +589,21 @@ export async function runRelationImportCli(argv: string[]): Promise<void> {
   const classifier = createImportClassifier(
     readJsonFile<OpenClawConfig>(flags.config),
   );
-  let unsaved = 0;
+  let dirty = 0;
+  let wrote = false;
+  const flush = (state: ImportCheckpoint) => {
+    writeJsonAtomic(flags.checkpoint, state, { mode: 0o600 });
+    dirty = 0;
+    wrote = true;
+  };
   const result = await classifyRelations(plan, classifier, {
     limit: command === "sample" ? 20 : undefined,
     checkpoint,
     onCheckpoint: (state) => {
-      unsaved++;
-      if (unsaved >= CLI_CHECKPOINT_FLUSH_INTERVAL) {
-        unsaved = 0;
-        writeJsonAtomic(flags.checkpoint, state, { mode: 0o600 });
-      }
+      if (++dirty >= CLI_CHECKPOINT_FLUSH_INTERVAL) flush(state);
     },
   });
-  writeJsonAtomic(flags.checkpoint, result, { mode: 0o600 });
+  if (dirty > 0 || !wrote) flush(result);
   console.log(
     JSON.stringify({
       classified: Object.keys(result.results).length,

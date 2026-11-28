@@ -1,7 +1,9 @@
+import * as fsSync from "node:fs";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("node:fs", { spy: true });
 import {
   applyImportCheckpoint,
   CLASSIFICATION_VERSION,
@@ -311,6 +313,9 @@ describe("relation import", () => {
       "related",
     );
 
+    expect(selectRelationType({ ...base, specializes: 0.9 })).toBe(
+      "specializes",
+    );
     expect(
       selectRelationType({
         specializes: 0.85,
@@ -320,6 +325,13 @@ describe("relation import", () => {
         depends_on: 0.55,
       }),
     ).toBe("specializes");
+    expect(
+      selectRelationType({
+        ...base,
+        specializes: 0.85,
+        similar_to: 0.88 + 1.5 * Number.EPSILON,
+      }),
+    ).toBe("related");
     expect(
       selectRelationType({
         specializes: 0.84,
@@ -467,6 +479,148 @@ describe("relation import", () => {
       expect(summary.needsModel).toBe(2);
       expect(summary.estimatedRequests).toBe(2);
     } finally {
+      output.mockRestore();
+    }
+  });
+  it("flushes CLI checkpoints once for 19 or 20 edges and twice for 21 edges", async () => {
+    for (const [count, expectedWrites] of [
+      [19, 1],
+      [20, 1],
+      [21, 2],
+    ] as const) {
+      const dir = await root();
+      const dataRoot = await root();
+      const related = Object.fromEntries(
+        Array.from({ length: count }, (_, i) => [`b${i}`, `reason ${i}`]),
+      );
+      await skill(dir, "a", `'${JSON.stringify(related)}'`);
+      for (let i = 0; i < count; i++) await skill(dir, `b${i}`);
+      const config = path.join(dataRoot, "config.json");
+      const checkpoint = path.join(dataRoot, "checkpoint.json");
+      await fs.writeFile(
+        config,
+        JSON.stringify({
+          plugins: {
+            entries: {
+              "skill-harness": {
+                config: {
+                  decisionModel: { model: "test-jev", apiKey: "fixture-only" },
+                },
+              },
+            },
+          },
+        }),
+      );
+      const request = vi
+        .spyOn(TypeSafeClient.prototype, "systemOne")
+        .mockImplementation((async (input: unknown) =>
+          response(input)) as TypeSafeClient["systemOne"]);
+      const renameSpy = vi.mocked(fsSync.renameSync);
+      renameSpy.mockClear();
+      const output = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await runRelationImportCli([
+          "classify",
+          "--source",
+          dir,
+          "--config",
+          config,
+          "--checkpoint",
+          checkpoint,
+        ]);
+        const writes = renameSpy.mock.calls.filter(
+          ([, newPath]) => newPath === checkpoint,
+        ).length;
+        expect(writes).toBe(expectedWrites);
+        const saved = JSON.parse(await fs.readFile(checkpoint, "utf8")) as {
+          results: Record<string, unknown>;
+        };
+        expect(Object.keys(saved.results)).toHaveLength(count);
+      } finally {
+        renameSpy.mockClear();
+        request.mockRestore();
+        output.mockRestore();
+      }
+    }
+  });
+  it("stops admitting new edges and drains in-flight requests when a CLI checkpoint flush fails", async () => {
+    const count = 65;
+    const dir = await root();
+    const dataRoot = await root();
+    const related = Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [`b${i}`, `reason ${i}`]),
+    );
+    await skill(dir, "a", `'${JSON.stringify(related)}'`);
+    for (let i = 0; i < count; i++) await skill(dir, `b${i}`);
+    const config = path.join(dataRoot, "config.json");
+    const checkpoint = path.join(dataRoot, "checkpoint.json");
+    await fs.writeFile(
+      config,
+      JSON.stringify({
+        plugins: {
+          entries: {
+            "skill-harness": {
+              config: {
+                decisionModel: { model: "test-jev", apiKey: "fixture-only" },
+              },
+            },
+          },
+        },
+      }),
+    );
+    let started = 0;
+    let active = 0;
+    let settled = 0;
+    const request = vi
+      .spyOn(TypeSafeClient.prototype, "systemOne")
+      .mockImplementation((async (input: unknown) => {
+        started++;
+        active++;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active--;
+        settled++;
+        return response(input);
+      }) as TypeSafeClient["systemOne"]);
+    const actualFs = await vi.importActual<typeof import("node:fs")>("node:fs");
+    const renameSpy = vi
+      .mocked(fsSync.renameSync)
+      .mockImplementation((oldPath, newPath) => {
+        if (newPath === checkpoint) {
+          throw Object.assign(new Error("ENOSPC: no space left on device"), {
+            code: "ENOSPC",
+          });
+        }
+        return actualFs.renameSync(oldPath, newPath);
+      });
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await expect(
+        runRelationImportCli([
+          "classify",
+          "--source",
+          dir,
+          "--config",
+          config,
+          "--checkpoint",
+          checkpoint,
+        ]),
+      ).rejects.toThrow("ENOSPC");
+      const startedAtRejection = started;
+      expect(active).toBe(0);
+      expect(settled).toBe(startedAtRejection);
+      expect(startedAtRejection).toBeGreaterThanOrEqual(20);
+      expect(startedAtRejection).toBeLessThanOrEqual(23);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(started).toBe(startedAtRejection);
+      expect(fsSync.existsSync(checkpoint)).toBe(false);
+      expect(
+        (await fs.readdir(dataRoot)).filter((name) =>
+          name.startsWith("checkpoint.json.tmp-"),
+        ),
+      ).toEqual([]);
+    } finally {
+      renameSpy.mockRestore();
+      request.mockRestore();
       output.mockRestore();
     }
   });
