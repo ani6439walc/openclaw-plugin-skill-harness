@@ -230,16 +230,53 @@ function countFiles(root) {
   const files = walk(root).filter(isFile);
   return [files.length, sum(files.map((target) => fs.statSync(target).size))];
 }
-function qmdDatabaseHealth(snapshotRoot, databasePath) {
-  const snapshotMarkdownFiles = walk(snapshotRoot).filter((target) =>
-    target.endsWith(".md"),
+function countSkillSnapshotFiles(snapshotRoot) {
+  const metaRoot = path.join(snapshotRoot, "meta");
+  const bodyRoot = path.join(snapshotRoot, "body");
+  const refsRoot = path.join(snapshotRoot, "references");
+  if (
+    !isDirectory(metaRoot) &&
+    !isDirectory(bodyRoot) &&
+    !isDirectory(refsRoot)
+  ) {
+    return walk(snapshotRoot).filter(
+      (target) => isFile(target) && target.endsWith(".md"),
+    ).length;
+  }
+  const hasHiddenSegment = (base, target) =>
+    path
+      .relative(base, target)
+      .split(path.sep)
+      .some((segment) => segment.startsWith("."));
+  const metaFiles = walk(metaRoot).filter(
+    (target) =>
+      isFile(target) &&
+      path.basename(target) === "meta.md" &&
+      !hasHiddenSegment(metaRoot, target),
   ).length;
+  const bodyFiles = walk(bodyRoot).filter(
+    (target) =>
+      isFile(target) &&
+      path.basename(target) === "SKILL.md" &&
+      !hasHiddenSegment(bodyRoot, target),
+  ).length;
+  const refFiles = walk(refsRoot).filter(
+    (target) =>
+      isFile(target) &&
+      !hasHiddenSegment(refsRoot, target) &&
+      !target.endsWith(".identity.json") &&
+      !target.endsWith(".identity.yml"),
+  ).length;
+  return metaFiles + bodyFiles + refFiles;
+}
+function qmdDatabaseHealth(snapshotRoot, databasePath) {
+  const snapshotIndexedFiles = countSkillSnapshotFiles(snapshotRoot);
   const unavailable = {
     databaseStatus: "unavailable",
     integrityCheck: null,
     generation: null,
     leaseActive: null,
-    snapshotMarkdownFiles,
+    snapshotIndexedFiles,
     indexedDocuments: null,
     indexedVectors: null,
     documentsMatchVectors: null,
@@ -247,7 +284,7 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
   };
   if (!isFile(databasePath)) return unavailable;
   let db;
-  let integrityCheck, state, indexedDocuments, indexedVectors;
+  let integrityCheck, state, indexedDocuments, indexedVectors, vectorCoverage;
   try {
     db = new DatabaseSync(databasePath, { readOnly: true });
     integrityCheck = Object.values(
@@ -267,6 +304,17 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
       "SELECT COUNT(*) AS count FROM documents WHERE active = 1",
     );
     const vectors = optional("SELECT COUNT(*) AS count FROM content_vectors");
+    // QMD deduplicates documents by content hash and chunks long documents into
+    // multiple content_vectors rows per hash, so verify hash coverage when the
+    // hash columns exist and fall back to row counts on minimal fixtures.
+    vectorCoverage = optional(
+      `SELECT
+        (SELECT COUNT(*) FROM documents d
+          WHERE d.active = 1
+            AND NOT EXISTS (SELECT 1 FROM content_vectors v WHERE v.hash = d.hash)) AS missing,
+        (SELECT COUNT(*) FROM content_vectors v
+          WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.active = 1 AND d.hash = v.hash)) AS orphan`,
+    );
     indexedDocuments = docs?.count ?? null;
     indexedVectors = vectors?.count ?? null;
   } catch {
@@ -274,6 +322,14 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
   } finally {
     if (db) db.close();
   }
+  const documentsMatchVectors =
+    vectorCoverage !== null &&
+    typeof vectorCoverage.missing === "number" &&
+    typeof vectorCoverage.orphan === "number"
+      ? vectorCoverage.missing === 0 && vectorCoverage.orphan === 0
+      : indexedDocuments !== null && indexedVectors !== null
+        ? indexedDocuments === indexedVectors
+        : null;
   return {
     databaseStatus: state?.status ?? "unknown",
     integrityCheck,
@@ -281,16 +337,13 @@ function qmdDatabaseHealth(snapshotRoot, databasePath) {
     leaseActive:
       typeof state?.lease_expires_at === "number" &&
       state.lease_expires_at > Date.now(),
-    snapshotMarkdownFiles,
+    snapshotIndexedFiles,
     indexedDocuments,
     indexedVectors,
-    documentsMatchVectors:
-      indexedDocuments !== null && indexedVectors !== null
-        ? indexedDocuments === indexedVectors
-        : null,
+    documentsMatchVectors,
     snapshotMatchesIndexedDocuments:
       indexedDocuments !== null
-        ? snapshotMarkdownFiles === indexedDocuments
+        ? snapshotIndexedFiles === indexedDocuments
         : null,
   };
 }

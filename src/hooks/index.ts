@@ -1771,6 +1771,11 @@ export function createHookHandlers(deps: HookDeps) {
                   ? await resolveRelationGraph(
                       deps.dataRoot,
                       skillDiscoveryResult.visibleSkills,
+                      {
+                        focusNames: unionPool.candidateSkills.map(
+                          (skill) => skill.name,
+                        ),
+                      },
                     )
                   : new Map();
               const related = expandRelatedCandidates(
@@ -1787,6 +1792,17 @@ export function createHookHandlers(deps: HookDeps) {
                 visibleSkills: skillDiscoveryResult.visibleSkills,
                 enabled: true,
               });
+              if (related.added.length > 0 && deps.dataRoot) {
+                assertActive();
+                const expandedGraph = await resolveRelationGraph(
+                  deps.dataRoot,
+                  skillDiscoveryResult.visibleSkills,
+                  { focusNames: related.added },
+                );
+                for (const [key, edges] of expandedGraph) {
+                  if (!relationGraph.has(key)) relationGraph.set(key, edges);
+                }
+              }
               const relationEvidence = collectRelationEvidence(
                 superset.candidateSkills,
                 skillDiscoveryResult.visibleSkills,

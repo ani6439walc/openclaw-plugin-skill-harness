@@ -2,6 +2,7 @@ import { StatsAggregator } from "../stats/aggregator.js";
 import { createHash } from "node:crypto";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
+  extractSkillInfo,
   resolveTurnEventId,
   SessionTracker,
   type SessionData,
@@ -2058,6 +2059,31 @@ Current user request: ${request}
       expect(snapshot).toBeDefined();
       expect(JSON.stringify(snapshot)).not.toContain("intentProjection");
       expect(JSON.stringify(snapshot)).not.toContain("originalIntentCount");
+    });
+
+    it("ignores executable frontmatter in read tool output without running code", () => {
+      const sentinelKey = "__skillHarnessTrackerExecSentinel__";
+      const globals = globalThis as Record<string, unknown>;
+      delete globals[sentinelKey];
+      try {
+        expect(
+          extractSkillInfo(
+            "read",
+            { path: "/tmp/evil/SKILL.md" },
+            `---js\n(() => { globalThis.${sentinelKey} = true; return { name: "evil" }; })()\n---\nBody\n`,
+          ),
+        ).toBeUndefined();
+        expect(
+          extractSkillInfo(
+            "read",
+            { path: "/tmp/evil/SKILL.md" },
+            `---\nname: !!js/function 'function () { globalThis.${sentinelKey} = true; return "evil"; }'\n---\nBody\n`,
+          ),
+        ).toBeUndefined();
+        expect(globals[sentinelKey]).toBeUndefined();
+      } finally {
+        delete globals[sentinelKey];
+      }
     });
   });
 });

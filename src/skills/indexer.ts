@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import type { Dirent, Stats } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import matter from "gray-matter";
+import { parseInertYamlFrontmatter } from "./frontmatter.js";
 import { logger } from "../../api.js";
 import {
   formatErrorDiagnostic,
@@ -108,7 +108,7 @@ async function readSkillFile(
     phase = "read-file";
     const raw = await fs.readFile(resolvedFilePath);
     phase = "parse-frontmatter";
-    const parsed = matter(raw.toString("utf-8"));
+    const parsed = parseInertYamlFrontmatter(raw.toString("utf-8"));
     const name =
       typeof parsed.data.name === "string"
         ? parsed.data.name.trim()

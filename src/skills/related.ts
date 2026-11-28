@@ -13,6 +13,7 @@ import type { AvailableSkill, RelatedSkillResult } from "./types.js";
 export function relatedSkillsBySkillName(
   skills: readonly AvailableSkill[],
   api: OpenClawPluginApi,
+  focusNames?: readonly string[],
 ): Promise<Map<string, RelatedSkillResult[]>> {
   return resolveRelationGraph(
     resolvePluginDataRoot(
@@ -20,7 +21,10 @@ export function relatedSkillsBySkillName(
       "skill-harness",
     ),
     skills,
-    { keyMode: "exact" },
+    {
+      keyMode: "exact",
+      ...(focusNames !== undefined ? { focusNames } : {}),
+    },
   );
 }
 

@@ -808,6 +808,77 @@ test("multiple skill indexes aggregate failures without exposing names", () => {
   assert.equal(r.documentVectorMismatchCount, 1);
   assert.equal(JSON.stringify(r).includes("secret"), false);
 });
+test("hash-indexed skill QMD handles multi-chunk vectors, deduplicated hashes, and non-markdown references", () => {
+  const indexDir = path.join(root, "qmd/skills/indexes/hash-aware");
+  const docsDir = path.join(indexDir, "docs");
+  write("qmd/skills/indexes/hash-aware/docs/meta/alpha/meta.md", "# alpha\n");
+  write("qmd/skills/indexes/hash-aware/docs/body/alpha/SKILL.md", "body\n");
+  write(
+    "qmd/skills/indexes/hash-aware/docs/references/alpha/guide.md",
+    "guide\n",
+  );
+  write(
+    "qmd/skills/indexes/hash-aware/docs/references/alpha/schema.json",
+    "{}\n",
+  );
+  // Files excluded by QMD snapshot collection patterns must not cause mismatches.
+  write(
+    "qmd/skills/indexes/hash-aware/docs/references/alpha/alpha.identity.json",
+    "{}\n",
+  );
+  write(
+    "qmd/skills/indexes/hash-aware/docs/references/alpha/alpha.identity.yml",
+    "name: alpha\n",
+  );
+  write("qmd/skills/indexes/hash-aware/docs/references/alpha/.DS_Store", "x");
+  write("qmd/skills/indexes/hash-aware/docs/meta/alpha/stray.md", "ignored\n");
+  assert.ok(fs.existsSync(docsDir));
+
+  const dbPath = path.join(indexDir, "skill-search.sqlite");
+  const db = new DatabaseSync(dbPath);
+  db.exec(`CREATE TABLE embedding_index_state (singleton INTEGER PRIMARY KEY, status TEXT NOT NULL, generation INTEGER NOT NULL, lease_expires_at INTEGER, updated_at INTEGER NOT NULL);
+CREATE TABLE documents (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, active INTEGER NOT NULL);
+CREATE TABLE content_vectors (hash TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (hash, seq));
+INSERT INTO embedding_index_state VALUES (1, 'ready', 1, NULL, 1234567890);
+INSERT INTO documents VALUES (1, 'h-shared', 1);
+INSERT INTO documents VALUES (2, 'h-shared', 1);
+INSERT INTO documents VALUES (3, 'h-multi', 1);
+INSERT INTO documents VALUES (4, 'h-ref', 1);
+INSERT INTO documents VALUES (5, 'h-inactive', 0);
+INSERT INTO content_vectors VALUES ('h-shared', 0);
+INSERT INTO content_vectors VALUES ('h-multi', 0);
+INSERT INTO content_vectors VALUES ('h-multi', 1);
+INSERT INTO content_vectors VALUES ('h-ref', 0);`);
+  db.close();
+
+  const healthy = report().runtime.qmd.skills;
+  assert.equal(healthy.indexCount, 1);
+  assert.equal(healthy.documentVectorMismatchCount, 0);
+  assert.equal(healthy.snapshotMismatchCount, 0);
+
+  // Missing vector for an active document hash must report a mismatch.
+  const missingDb = new DatabaseSync(dbPath);
+  missingDb.exec("DELETE FROM content_vectors WHERE hash = 'h-ref'");
+  missingDb.close();
+  assert.equal(report().runtime.qmd.skills.documentVectorMismatchCount, 1);
+
+  // Orphan vector without an active document hash must also report a mismatch.
+  const orphanDb = new DatabaseSync(dbPath);
+  orphanDb.exec(
+    "INSERT INTO content_vectors VALUES ('h-ref', 0); INSERT INTO content_vectors VALUES ('h-orphan', 0);",
+  );
+  orphanDb.close();
+  assert.equal(report().runtime.qmd.skills.documentVectorMismatchCount, 1);
+
+  // Restoring vectors and dropping a reference file must report a snapshot mismatch only.
+  const cleanDb = new DatabaseSync(dbPath);
+  cleanDb.exec("DELETE FROM content_vectors WHERE hash = 'h-orphan'");
+  cleanDb.close();
+  remove("qmd/skills/indexes/hash-aware/docs/references/alpha/schema.json");
+  const snapshotDrift = report().runtime.qmd.skills;
+  assert.equal(snapshotDrift.documentVectorMismatchCount, 0);
+  assert.equal(snapshotDrift.snapshotMismatchCount, 1);
+});
 test("cohort boundary and retention coverage are explicit", () => {
   update(
     "stats.json",

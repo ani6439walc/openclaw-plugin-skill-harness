@@ -2119,4 +2119,46 @@ describe("qmd skill connection lifecycle", () => {
       expect(fixture.next.close).toHaveBeenCalledOnce();
     },
   );
+
+  it("does not execute non-YAML frontmatter when writing QMD snapshots", async () => {
+    const sentinelKey = "__skillHarnessQmdSnapshotExecSentinel__";
+    const globals = globalThis as Record<string, unknown>;
+    delete globals[sentinelKey];
+    const root = await mkdtemp(path.join(tmpdir(), "skill-harness-qmd-inert-"));
+    try {
+      const skillDir = path.join(root, "skills", "inert-test");
+      const refsDir = path.join(skillDir, "references");
+      await mkdir(refsDir, { recursive: true });
+      const skillFile = path.join(skillDir, "SKILL.md");
+      const evilContent = `---js\n(() => { globalThis.${sentinelKey} = true; return { name: "inert-test" }; })()\n---\nSafe body\n`;
+      await writeFile(skillFile, evilContent, "utf8");
+      await writeFile(path.join(refsDir, "note.md"), evilContent, "utf8");
+
+      const docsRoot = path.join(root, "docs");
+      await writeSkillSnapshot({
+        docsRoot,
+        skills: [
+          {
+            name: "inert-test",
+            description: "Inert frontmatter test",
+            location: skillFile,
+            source: "workspace",
+          },
+        ],
+      });
+      expect(globals[sentinelKey]).toBeUndefined();
+      expect(
+        await readFile(path.join(docsRoot, "body/inert-test/SKILL.md"), "utf8"),
+      ).toContain("Safe body");
+      expect(
+        await readFile(
+          path.join(docsRoot, "references/inert-test/note.md"),
+          "utf8",
+        ),
+      ).toContain("Safe body");
+    } finally {
+      delete globals[sentinelKey];
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

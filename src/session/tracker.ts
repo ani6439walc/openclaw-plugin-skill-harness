@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import type { RecentTurn } from "../types.js";
 import type { ReviewSnapshot, ReviewState } from "../review/types.js";
-import matter from "gray-matter";
+import { parseInertYamlFrontmatter } from "../skills/frontmatter.js";
 import { logger } from "../../api.js";
 import {
   agentSessionsPath,
@@ -473,13 +473,14 @@ function extractSkillInfoFromMarkdown(
   if (text === null) return;
 
   // Tool results may be truncated before the closing frontmatter delimiter.
-  // gray-matter treats that as malformed YAML and logs a noisy warning even
-  // though the underlying SKILL.md file is valid. Only parse complete
-  // frontmatter captured in the tool result.
-  if (!/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.test(text)) return;
+  // The YAML frontmatter parser treats that as malformed YAML and logs a noisy
+  // warning even though the underlying SKILL.md file is valid. Only parse
+  // complete YAML frontmatter captured in the tool result.
+  if (!/^\uFEFF?---(?:yaml|yml)?\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/i.test(text))
+    return;
 
   try {
-    const parsed = matter(text);
+    const parsed = parseInertYamlFrontmatter(text);
     if (typeof parsed.data?.name === "string" && parsed.data.name.trim()) {
       return {
         name: parsed.data.name,
