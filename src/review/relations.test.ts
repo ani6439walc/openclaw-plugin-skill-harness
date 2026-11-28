@@ -882,3 +882,166 @@ it("reports registry-unavailable up front for corrupt, symlinked, or missing-wit
     lstatSpy.mockRestore();
   }
 });
+
+it("prioritizes unreviewed related and imported neighbors ahead of reviewed ones and reconciles cursor after apply", async () => {
+  const { skills, getVisibleSkills } = await fixture(10, false);
+  const all = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: skills.map(({ name }) => name),
+    getVisibleSkills,
+  }))!;
+  const [seed, ...others] = all.skills;
+  // Seed alphabetically early reviewed edges (skill-1, skill-2),
+  // middle unreviewed typed edges (skill-3, skill-4),
+  // and alphabetically late unreviewed related edges (skill-5..skill-9).
+  await appendImportedRelations(root, [
+    ...others.slice(0, 4).map((to) => ({
+      from: seed.identity,
+      to: to.identity,
+      type: "composes_with" as const,
+      reason: "Typed workflow composition",
+    })),
+    ...others.slice(4).map((to) => ({
+      from: seed.identity,
+      to: to.identity,
+      type: "related" as const,
+      reason: "Broad imported relation",
+    })),
+  ]);
+  // Mark skill-1 and skill-2 as already reviewed via Review update.
+  const preReview = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["skill-0"],
+    getVisibleSkills,
+  }))!;
+  await preReview.admitSkill("skill-1");
+  await preReview.admitSkill("skill-2");
+  const reviewSeed = preReview.skills[0]!;
+  const reviewedTargets = preReview.skills.filter(
+    (entry) => entry.name === "skill-1" || entry.name === "skill-2",
+  );
+  await applyPreparedRelationReview(
+    preReview,
+    reviewedTargets.map((target) => ({
+      targetKind: "skill-relation" as const,
+      trigger: "relation-health-check" as const,
+      operation: "update" as const,
+      fromSkillId: reviewSeed.identity.id,
+      toSkillId: target.identity.id,
+      relationType: "composes_with" as const,
+      reason: "Reviewed workflow composition",
+      dedupeKey: `review-${target.name}`,
+      summary: `Confirm ${target.name}`,
+      evidence: ["Read full skills"],
+      correctionGoal: "Confirm reviewed composition",
+      suggestedChange: "Update composition",
+      relationEvidence: [reviewSeed, target].map((skill) => ({
+        skillId: skill.identity.id,
+        filePath: "SKILL.md",
+        startLine: 4,
+        endLine: 4,
+        quote: skill.content.split(/\r?\n/)[3]!,
+      })),
+    })),
+    "mark-reviewed",
+    "main",
+  );
+
+  // Run 1 at offset 0 must pick the first 4 unreviewed related neighbors (skill-5..skill-8),
+  // ahead of alphabetically earlier skill-1..skill-4.
+  const run1 = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["skill-0"],
+    getVisibleSkills,
+  }))!;
+  expect(run1.skills.slice(1).map((entry) => entry.name)).toEqual([
+    "skill-5",
+    "skill-6",
+    "skill-7",
+    "skill-8",
+  ]);
+  expect(run1.inspectionCursor?.nextOffset).toBe(4);
+
+  // Upgrade skill-5 and skill-6, and delete skill-7 (leaving skill-8 as unreviewed related).
+  const run1Seed = run1.skills[0]!;
+  const byName = new Map(run1.skills.map((entry) => [entry.name, entry]));
+  const evidenceFor = (targetName: string) =>
+    [run1Seed, byName.get(targetName)!].map((skill) => ({
+      skillId: skill.identity.id,
+      filePath: "SKILL.md",
+      startLine: 4,
+      endLine: 4,
+      quote: skill.content.split(/\r?\n/)[3]!,
+    }));
+  await applyPreparedRelationReview(
+    run1,
+    [
+      {
+        targetKind: "skill-relation",
+        trigger: "relation-health-check",
+        operation: "update",
+        fromSkillId: run1Seed.identity.id,
+        toSkillId: byName.get("skill-5")!.identity.id,
+        relationType: "composes_with",
+        reason: "Upgraded from related",
+        dedupeKey: "upgrade-5",
+        summary: "Upgrade skill-5",
+        evidence: ["Read full skills"],
+        correctionGoal: "Replace broad related with composes_with",
+        suggestedChange: "Update skill-5",
+        relationEvidence: evidenceFor("skill-5"),
+      },
+      {
+        targetKind: "skill-relation",
+        trigger: "relation-health-check",
+        operation: "update",
+        fromSkillId: run1Seed.identity.id,
+        toSkillId: byName.get("skill-6")!.identity.id,
+        relationType: "specializes",
+        reason: "Upgraded from related",
+        dedupeKey: "upgrade-6",
+        summary: "Upgrade skill-6",
+        evidence: ["Read full skills"],
+        correctionGoal: "Replace broad related with specializes",
+        suggestedChange: "Update skill-6",
+        relationEvidence: evidenceFor("skill-6"),
+      },
+      {
+        targetKind: "skill-relation",
+        trigger: "relation-health-check",
+        operation: "delete",
+        fromSkillId: run1Seed.identity.id,
+        toSkillId: byName.get("skill-7")!.identity.id,
+        dedupeKey: "delete-7",
+        summary: "Delete unrelated skill-7",
+        evidence: ["Read full skills"],
+        correctionGoal: "No documented workflow or structural link",
+        suggestedChange: "Delete skill-7",
+        relationEvidence: evidenceFor("skill-7"),
+      },
+    ],
+    "run-1-changes",
+    "main",
+  );
+
+  // Reconciled cursor must land directly on skill-9 (next uninspected neighbor)
+  // without skipping skill-9/skill-3/skill-4 or re-inspecting skill-5/skill-6/skill-8.
+  // Post-apply priority list is:
+  //   [skill-8 (T0), skill-9 (T0), skill-3 (T1), skill-4 (T1), skill-1 (T2), skill-2 (T2), skill-5 (T2), skill-6 (T2)]
+  expect(run1.inspectionCursor?.nextOffset).toBe(1);
+  const run2 = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["skill-0"],
+    getVisibleSkills,
+    getNeighborOffset: (key) =>
+      key === run1.inspectionCursor!.key
+        ? run1.inspectionCursor!.nextOffset
+        : 0,
+  }))!;
+  expect(run2.skills.slice(1).map((entry) => entry.name)).toEqual([
+    "skill-9",
+    "skill-3",
+    "skill-4",
+    "skill-1",
+  ]);
+});

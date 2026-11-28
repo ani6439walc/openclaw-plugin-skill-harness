@@ -6,10 +6,15 @@ import { logger, type OpenClawPluginApi } from "../../api.js";
 import { resolveConfig } from "../config.js";
 import { registerRelationSource } from "../skills/relation-sources.js";
 import {
+  appendImportedRelations,
   readRelationGraph,
   relationGraphPath,
 } from "../skills/relation-graph.js";
 import { prepareRelationReviewContext } from "./relations.js";
+import {
+  createReviewToolRegistry,
+  getReviewToolBinding,
+} from "./tool-bindings.js";
 import {
   buildReviewPrompt,
   parseReviewFindingsDetailed,
@@ -215,11 +220,195 @@ it("guides the reviewer to prefer specific relation types over generic related a
     if (i > 0) expect(positions[i]).toBeGreaterThan(positions[i - 1]!);
   }
   expect(prompt).toContain("Prefer the most specific relation type");
+  expect(prompt).toContain(
+    "prioritize high-value structural and workflow links (depends_on, composes_with, specializes, conflicts_with) before alternative-capability similar_to edges",
+  );
   expect(prompt).toContain("Treat related as a last resort");
   expect(prompt).toContain("upgrading the edge to a more specific type");
   expect(prompt).toContain(
+    "no concrete documented workflow, structural, or alternative-capability link",
+  );
+  expect(prompt).toContain(
+    "consolidate any useful context into one edge (update if needed) and delete the redundant reverse edge",
+  );
+  expect(prompt).toContain(
+    "delete the reversed edge and create the correctly directed edge (reporting changes-proposed for both existing and discovery)",
+  );
+  expect(prompt).toContain(
     "Helpful composition is composes_with, not depends_on",
   );
+});
+
+it("consolidates redundant bidirectional symmetric edges in one atomic batch", async () => {
+  const { context, finding } = await fixture();
+  const [a, b] = context.skills;
+  await appendImportedRelations(root, [
+    {
+      from: a.identity,
+      to: b.identity,
+      type: "similar_to",
+      reason: "A overlaps with B.",
+    },
+    {
+      from: b.identity,
+      to: a.identity,
+      type: "related",
+      reason: "B also overlaps with A.",
+    },
+  ]);
+  const prepared = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["a"],
+    getVisibleSkills: context.getVisibleSkills,
+  }))!;
+  const registry = createReviewToolRegistry();
+  const runEmbeddedAgent = vi.fn(
+    async (params: {
+      agentId?: string;
+      sessionId?: string;
+      sessionKey?: string;
+      toolBindings?: Record<string, unknown>;
+    }) => {
+      const binding = getReviewToolBinding(params, registry);
+      await binding?.search(async () => ({ success: true, skills: [] }));
+      return {
+        payloads: [
+          {
+            text: JSON.stringify({
+              findings: [
+                {
+                  ...finding,
+                  hasFinding: true,
+                  operation: "update",
+                  fromSkillId: a.identity.id,
+                  toSkillId: b.identity.id,
+                  relationType: "similar_to",
+                  reason: "Consolidated bidirectional overlap.",
+                  dedupeKey: "consolidate-ab",
+                  correctionGoal: "Consolidate symmetric context into A->B",
+                },
+                {
+                  hasFinding: true,
+                  targetKind: "skill-relation",
+                  operation: "delete",
+                  fromSkillId: b.identity.id,
+                  toSkillId: a.identity.id,
+                  dedupeKey: "delete-redundant-ba",
+                  summary: "Delete redundant reverse edge",
+                  evidence: ["Read both full skills"],
+                  correctionGoal: "Remove redundant symmetric reverse edge",
+                  suggestedChange: "Delete B->A",
+                  relationEvidence: finding.relationEvidence,
+                },
+              ],
+              relationReview: {
+                existing: "changes-proposed",
+                discovery: "no-change",
+              },
+            }),
+          },
+        ],
+      };
+    },
+  );
+  const api = {
+    config: {},
+    runtime: { agent: { runEmbeddedAgent } },
+  } as unknown as OpenClawPluginApi;
+  const result = await runReviewSubagent({
+    api,
+    config: resolveConfig({}),
+    agentId: "main",
+    modelRef: { provider: "test", model: "review" },
+    snapshot,
+    relationContext: prepared,
+    reviewToolRegistry: registry,
+  });
+  expect(result).toMatchObject({
+    outcome: "applied",
+    relationOutcome: "applied",
+    changedRelationCount: 2,
+    relationSearchCount: 1,
+  });
+  const graph = await readRelationGraph(root);
+  expect(graph?.relations).toHaveLength(1);
+  expect(graph?.relations[0]).toMatchObject({
+    from: a.identity.id,
+    to: b.identity.id,
+    rel: "similar_to",
+    properties: expect.objectContaining({
+      reason: "Consolidated bidirectional overlap.",
+    }),
+  });
+});
+
+it("reverses a misdirected asymmetric edge atomically via delete plus create", async () => {
+  const { context, finding } = await fixture();
+  const [a, b] = context.skills;
+  await appendImportedRelations(root, [
+    {
+      from: b.identity,
+      to: a.identity,
+      type: "depends_on",
+      reason: "Backwards prerequisite direction.",
+    },
+  ]);
+  const prepared = (await prepareRelationReviewContext({
+    dataRoot: root,
+    seedNames: ["a"],
+    getVisibleSkills: context.getVisibleSkills,
+  }))!;
+  const result = await run(prepared, async () => ({
+    payloads: [
+      {
+        text: JSON.stringify({
+          findings: [
+            {
+              hasFinding: true,
+              targetKind: "skill-relation",
+              operation: "delete",
+              fromSkillId: b.identity.id,
+              toSkillId: a.identity.id,
+              dedupeKey: "delete-reversed-ba",
+              summary: "Remove reversed depends_on",
+              evidence: ["Read both full skills"],
+              correctionGoal: "Direction was reversed",
+              suggestedChange: "Delete B->A",
+              relationEvidence: finding.relationEvidence,
+            },
+            {
+              ...finding,
+              hasFinding: true,
+              operation: "create",
+              fromSkillId: a.identity.id,
+              toSkillId: b.identity.id,
+              relationType: "depends_on",
+              reason: "A explicitly requires B.",
+              dedupeKey: "create-directed-ab",
+              correctionGoal: "Record corrected prerequisite direction A->B",
+            },
+          ],
+          relationReview: {
+            existing: "changes-proposed",
+            discovery: "changes-proposed",
+          },
+        }),
+      },
+    ],
+  }));
+  expect(result).toMatchObject({
+    outcome: "applied",
+    relationOutcome: "applied",
+    changedRelationCount: 2,
+  });
+  const graph = await readRelationGraph(root);
+  expect(graph?.relations).toHaveLength(1);
+  expect(graph?.relations[0]).toMatchObject({
+    from: a.identity.id,
+    to: b.identity.id,
+    rel: "depends_on",
+    properties: expect.objectContaining({ reason: "A explicitly requires B." }),
+  });
 });
 
 it("stages only relation evidence and publishes a checked graph batch", async () => {

@@ -16,6 +16,7 @@ import {
   readSkillIdentity,
 } from "../skills/relation-graph.js";
 import type {
+  GraphEntity,
   GraphRelation,
   RelationReviewChange,
   SkillIdentity,
@@ -78,6 +79,49 @@ export interface RelationReviewContext {
   preparation: RelationPreparationSummary;
   inspectionCursor?: { key: string; nextOffset: number };
   admitSkill: (name: string) => Promise<RelationSkillAdmission>;
+}
+
+const reconcileInspectionCursors = new WeakMap<
+  RelationReviewContext,
+  (changes: readonly RelationReviewChange[]) => void
+>();
+
+/**
+ * Order visible non-seed neighbors by maintenance priority before name:
+ * 0 = unreviewed generic `related`, 1 = other unreviewed imported edge,
+ * 2 = all seed-incident edges already reviewed.
+ */
+function prioritizeExistingNeighbors(params: {
+  relations: readonly GraphRelation[];
+  entities: ReadonlyMap<string, Pick<GraphEntity, "properties">>;
+  reviewedPairs: ReadonlySet<string> | undefined;
+  seedIds: ReadonlySet<string>;
+  seedKeys: ReadonlySet<string>;
+  visibleKeys: ReadonlySet<string>;
+}): string[] {
+  const priorityByKey = new Map<string, number>();
+  for (const edge of params.relations) {
+    const fromIsSeed = params.seedIds.has(edge.from);
+    const toIsSeed = params.seedIds.has(edge.to);
+    if (!fromIsSeed && !toIsSeed) continue;
+    const other = fromIsSeed ? edge.to : edge.from;
+    if (params.seedIds.has(other)) continue;
+    const node = params.entities.get(other);
+    if (typeof node?.properties.name !== "string") continue;
+    const key = canonicalIdentity(node.properties.name);
+    if (params.seedKeys.has(key) || !params.visibleKeys.has(key)) continue;
+    const isReviewed = Boolean(
+      params.reviewedPairs?.has(JSON.stringify([edge.from, edge.to])),
+    );
+    const tier = isReviewed ? 2 : edge.rel === "related" ? 0 : 1;
+    const current = priorityByKey.get(key);
+    if (current === undefined || tier < current) priorityByKey.set(key, tier);
+  }
+  return [...priorityByKey.keys()].sort((left, right) => {
+    const tierDiff =
+      (priorityByKey.get(left) ?? 2) - (priorityByKey.get(right) ?? 2);
+    return tierDiff !== 0 ? tierDiff : left < right ? -1 : left > right ? 1 : 0;
+  });
 }
 
 function visibleWinners(skills: readonly AvailableSkill[]) {
@@ -263,19 +307,16 @@ export async function prepareRelationReviewContext(params: {
       ),
     ),
   );
-  const extraNames = new Set<string>();
-  for (const edge of graph?.relations ?? []) {
-    const other = seedIds.has(edge.from)
-      ? edge.to
-      : seedIds.has(edge.to)
-        ? edge.from
-        : undefined;
-    const node = other ? graph?.entities.get(other) : undefined;
-    if (typeof node?.properties.name === "string") {
-      const key = canonicalIdentity(node.properties.name);
-      if (!captured.has(key) && initialWinners.has(key)) extraNames.add(key);
-    }
-  }
+  const capturedSeedKeys = new Set(captured.keys());
+  const visibleKeys = new Set(initialWinners.keys());
+  const neighbors = prioritizeExistingNeighbors({
+    relations: graph?.relations ?? [],
+    entities: graph?.entities ?? new Map(),
+    reviewedPairs: graph?.reviewedPairs,
+    seedIds,
+    seedKeys: capturedSeedKeys,
+    visibleKeys,
+  });
   const attemptedExtras = new Map<string, RelationSkillAdmission>();
   async function captureExtra(
     name: string,
@@ -327,7 +368,6 @@ export async function prepareRelationReviewContext(params: {
     attemptedExtras.set(key, result);
     return result;
   }
-  const neighbors = [...extraNames].sort();
   const cursorKey = digest(JSON.stringify([...seedIds].sort()));
   const rawOffset = params.getNeighborOffset?.(cursorKey) ?? 0;
   const offset =
@@ -346,7 +386,7 @@ export async function prepareRelationReviewContext(params: {
   // A single run can issue parallel tool calls. Serialize admission so the
   // byte/skill budgets and pair baselines are checked and changed atomically.
   let admissionQueue: Promise<unknown> = Promise.resolve();
-  return {
+  const context: RelationReviewContext = {
     dataRoot: params.dataRoot,
     seedIds: [...seedIds],
     skills,
@@ -370,6 +410,79 @@ export async function prepareRelationReviewContext(params: {
       return admission;
     },
   };
+  if (neighbors.length) {
+    const baseRelations = structuredClone(graph?.relations ?? []);
+    const baseEntities = new Map<string, Pick<GraphEntity, "properties">>(
+      [...(graph?.entities ?? new Map()).entries()].map(([id, entity]) => [
+        id,
+        { properties: { ...entity.properties } },
+      ]),
+    );
+    const baseReviewedPairs = new Set(graph?.reviewedPairs ?? []);
+    const baseVisibleKeys = new Set(visibleKeys);
+    reconcileInspectionCursors.set(context, (appliedChanges) => {
+      const nextRelations = structuredClone(baseRelations);
+      const nextEntities = new Map(baseEntities);
+      const nextReviewedPairs = new Set(baseReviewedPairs);
+      const nextVisibleKeys = new Set(baseVisibleKeys);
+      for (const change of appliedChanges) {
+        const pair = JSON.stringify([change.from.id, change.to.id]);
+        nextReviewedPairs.add(pair);
+        for (const identity of [change.from, change.to]) {
+          nextEntities.set(identity.id, {
+            properties: {
+              ...(nextEntities.get(identity.id)?.properties ?? {}),
+              name: identity.name,
+            },
+          });
+          nextVisibleKeys.add(canonicalIdentity(identity.name));
+        }
+        for (let i = nextRelations.length - 1; i >= 0; i--) {
+          if (
+            nextRelations[i]!.from === change.from.id &&
+            nextRelations[i]!.to === change.to.id
+          ) {
+            nextRelations.splice(i, 1);
+          }
+        }
+        if (change.operation !== "delete" && change.type) {
+          nextRelations.push({
+            from: change.from.id,
+            rel: change.type,
+            to: change.to.id,
+            properties: { reason: change.reason ?? "" },
+          });
+        }
+      }
+      const postNeighbors = prioritizeExistingNeighbors({
+        relations: nextRelations,
+        entities: nextEntities,
+        reviewedPairs: nextReviewedPairs,
+        seedIds,
+        seedKeys: capturedSeedKeys,
+        visibleKeys: nextVisibleKeys,
+      });
+      if (postNeighbors.length <= 4) {
+        context.inspectionCursor = { key: cursorKey, nextOffset: 0 };
+        return;
+      }
+      const postIndex = new Map(
+        postNeighbors.map((neighbor, index) => [neighbor, index]),
+      );
+      let nextOffset = 0;
+      for (let step = 0; step < neighbors.length; step++) {
+        const candidate =
+          neighbors[(offset + initialAttempts + step) % neighbors.length]!;
+        const idx = postIndex.get(candidate);
+        if (idx !== undefined) {
+          nextOffset = idx;
+          break;
+        }
+      }
+      context.inspectionCursor = { key: cursorKey, nextOffset };
+    });
+  }
+  return context;
 }
 
 export async function stageRelationReviewSkill(
@@ -569,7 +682,7 @@ export async function applyPreparedRelationReview(
   const targets = new Set(
     changes.flatMap((change) => [change.from.id, change.to.id]),
   );
-  return applyRelationReviewChanges(context.dataRoot, changes, {
+  const receipt = await applyRelationReviewChanges(context.dataRoot, changes, {
     batchId: randomUUID(),
     eventId,
     agentId,
@@ -612,4 +725,6 @@ export async function applyPreparedRelationReview(
       signal?.throwIfAborted();
     },
   });
+  reconcileInspectionCursors.get(context)?.(changes);
+  return receipt;
 }
